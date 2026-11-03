@@ -17,6 +17,7 @@ import type {
   SourceSyncInput,
   SourceSyncConflict,
   SourceSyncResult,
+  SkillSourceRefreshResult,
 } from "./types";
 
 type WorkspaceTargetPayload = {
@@ -203,8 +204,15 @@ export function updateSkillSource(input: SkillSourceMutationInput): Promise<Work
   return invoke("update_skill_source", { input });
 }
 
-export function refreshGitSkillSource(sourceId: string): Promise<void> {
+export function refreshGitSkillSource(
+  sourceId: string
+): Promise<SkillSourceRefreshResult> {
   return invoke("refresh_git_skill_source", { sourceId });
+}
+
+// 取消当前在途的来源拉取；没有在途拉取时后端是无害的空操作。
+export function cancelSkillSourceFetch(): Promise<void> {
+  return invoke("cancel_skill_source_fetch");
 }
 
 export function applyMcpToTarget(

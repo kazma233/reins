@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import {
+  cancelSkillSourceFetch,
   getSyncSkillOptions,
   getSyncTargetOptions,
   refreshGitSkillSource,
@@ -9,6 +10,7 @@ import {
 } from "../../api";
 import { extractErrorMessage } from "@shared/lib/errors";
 import AppTooltip from "@shared/ui/AppTooltip.vue";
+import ConfirmDialog from "@shared/ui/ConfirmDialog.vue";
 import DialogShell from "@shared/ui/DialogShell.vue";
 import SyncTargetGroups from "../SyncTargetGroups.vue";
 import { useWorkspaceAction } from "../../composables/useWorkspaceAction";
@@ -63,6 +65,8 @@ const skillSearch = ref("");
 const showUnmatched = ref(false);
 const sourceRoot = ref("");
 const loadError = ref<string | null>(null);
+// 拉取在途时点关闭的二次确认：确认 = 取消拉取并关弹窗，取消 = 继续拉取。
+const confirmCloseFetch = ref(false);
 // 弹窗内操作的常驻结果：列表就地更新看不出数量变化，结果句留在底部同步按钮旁。
 // 同步流程由父级驱动，它通过 defineExpose 的 reportResult 回写同一个槽位。
 const resultMessage = ref<{ text: string; failed: boolean } | null>(null);
@@ -139,6 +143,7 @@ watch(
   ([open]) => {
     if (!open || !props.source) {
       loadToken += 1;
+      confirmCloseFetch.value = false;
       return;
     }
     void refreshOptions();
@@ -202,6 +207,30 @@ const canConfirm = computed(
 const canRemoveSync = computed(() => selectedTargetIds.value.size > 0 && !busy.value);
 const isGitSource = computed(() => props.source?.type === "git");
 const canRefreshSource = computed(() => isGitSource.value && !busy.value);
+// 网络拉取在途：git 来源的选项读取（缓存过期会拉远端）或强制拉取。
+// 本地操作与本地来源的快速扫描不在此列——它们不解锁关闭。
+const gitFetchInFlight = computed(
+  () => isGitSource.value && (loading.value || refreshingSource.value),
+);
+
+// 关闭入口统一走这里：拉取在途时先二次确认，其余照常直接关闭。
+function handleCloseRequest() {
+  if (gitFetchInFlight.value) {
+    confirmCloseFetch.value = true;
+    return;
+  }
+  emit("close");
+}
+
+async function handleConfirmCloseDuringFetch() {
+  confirmCloseFetch.value = false;
+  try {
+    await cancelSkillSourceFetch();
+  } catch {
+    // 取消失败不阻断关闭：关闭是用户主意图，拉取只影响缓存，让它在后台自然结束。
+  }
+  emit("close");
+}
 
 function handleSelectAllSkills() {
   selectedSkillPaths.value = new Set(visibleSkills.value.map((s) => s.relativePath));
@@ -308,7 +337,12 @@ async function handleRefreshSource() {
   await runWorkspaceAction({
     action: () => refreshGitSkillSource(source.id),
     error: `拉取 ${source.label} 失败。`,
-    onSuccess: () => {
+    onSuccess: (result) => {
+      // 被取消不是失败：缓存停留在旧内容，不能当「已拉取」上报，也不重扫。
+      if (result.cancelled) {
+        reportResult({ text: "已取消拉取，保留本地缓存。", failed: false });
+        return;
+      }
       reportResult({ text: `已从远端拉取 ${source.label}。`, failed: false });
       void refreshOptions({ keepExistingOptions: true });
     },
@@ -327,8 +361,8 @@ async function handleRefreshSource() {
     eyebrow="Sync"
     :title="`同步来源: ${source?.label ?? ''}`"
     title-id="source-sync-dialog-title"
-    :close-disabled="busy"
-    @close="$emit('close')"
+    :close-disabled="busy && !gitFetchInFlight"
+    @close="handleCloseRequest"
   >
     <template #actions>
       <!-- 结果占位固定在按钮组左侧：绝对定位 + 预留 padding，
@@ -511,4 +545,18 @@ async function handleRefreshSource() {
       </div>
     </template>
   </DialogShell>
+
+  <!-- 拉取在途时关闭弹窗的二次确认：确认取消拉取并关闭，取消则继续拉取。 -->
+  <ConfirmDialog
+    :open="confirmCloseFetch"
+    confirm-button-class-name="primary-button"
+    confirm-label="取消拉取并关闭"
+    cancel-label="继续拉取"
+    description="正在从远端拉取来源内容，关闭会取消本次拉取；本地已有的缓存会保留。"
+    eyebrow="Sync"
+    title="取消拉取并关闭"
+    title-id="source-sync-close-confirm-title"
+    @close="confirmCloseFetch = false"
+    @confirm="handleConfirmCloseDuringFetch"
+  />
 </template>
