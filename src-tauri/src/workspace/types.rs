@@ -801,3 +801,12 @@ pub(crate) struct SyncSkillOptionsResult {
     pub(crate) skills: Vec<SyncSkillOption>,
     pub(crate) source_root: String,
 }
+
+// Output from refresh_git_skill_source: cancelled=true 表示拉取被用户取消，
+// 本地缓存停留在旧内容，调用方不得把它当成功上报。
+#[derive(Clone, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/features/workspace/generated/")]
+pub(crate) struct SkillSourceRefreshResult {
+    pub(crate) cancelled: bool,
+}

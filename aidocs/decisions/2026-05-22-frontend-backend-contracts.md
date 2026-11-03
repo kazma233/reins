@@ -58,6 +58,8 @@
 | `src/features/workspace/api.ts` | `src-tauri/src/workspace/commands.rs` | `create_workspace_mcp` / `update_workspace_mcp` / `delete_workspace_mcp` | MCP CRUD |
 | `src/features/workspace/api.ts` | `src-tauri/src/workspace/commands.rs` | `import_skill_to_target` / `remove_skill_from_target` | skill 分发 |
 | `src/features/workspace/api.ts` | `src-tauri/src/workspace/commands.rs` | `apply_mcp_to_target` / `remove_mcp_from_target` / `preview_mcp_target` | MCP 分发与预览 |
+| `src/features/workspace/api.ts` | `src-tauri/src/workspace/commands.rs` | `refresh_git_skill_source` | 强制拉取 git 来源缓存；返回 `SkillSourceRefreshResult`（`cancelled=true` 表示被用户取消，不得当成功上报） |
+| `src/features/workspace/api.ts` | `src-tauri/src/workspace/commands.rs` | `cancel_skill_source_fetch` | 取消当前在途的来源 git 拉取；无在途拉取时为空操作（详见 2026-11-03 拉取取消决策） |
 
 ### Workspace 关键 DTO
 
@@ -70,6 +72,7 @@
 | `TargetPreset` | `TargetPreset` | `src-tauri/src/workspace/types.rs` |
 | `McpTransport` | `McpTransport` | `src-tauri/src/workspace/types.rs` |
 | `SkillDiscoveryResult` | `SkillDiscoveryResultView` | `src-tauri/src/workspace/types.rs` |
+| `SkillSourceRefreshResult` | `SkillSourceRefreshResult` | `src-tauri/src/workspace/types.rs` |
 | `SkillSourceSyncResult` | `SkillSourceSyncResult` | `src-tauri/src/workspace/types.rs` |
 | `SkillApplyResult` | `SkillApplyResult` | `src-tauri/src/workspace/types.rs` |
 | `SkillRemoveResult` | `SkillRemoveResult` | `src-tauri/src/workspace/types.rs` |
@@ -88,4 +91,5 @@
 ## 变更记录
 
 - 2026-06-04 增补：`delete_skill_source` / `delete_skill_sources` 与 `SkillSourceManageDialog` 一同引入，详见 `2026-06-04-skill-source-management.md`。
+- 2026-11-03 增补：`refresh_git_skill_source` 返回值从 `void` 变为 `SkillSourceRefreshResult`；新增 `cancel_skill_source_fetch`（来源 git 拉取取消），详见 `2026-11-03-skill-source-fetch-cancellation.md`。
 - 2026-10-08 变更：移除自定义 target 创建能力。新增 `get_target_presets`（`TargetPreset[]`，AgentSpec 派生下发）；`create_workspace_target` 收紧为七个内置 id 且 MCP 格式由后端派生。`McpConfigType` 从契约面退役：ts 不再导出，`create/update_workspace_target` 参数与 `TargetPreset` 均不携带，target 视图以 `mcp_format_description`（格式 writer 的中文说明）代替类型暴露；Rust 枚举保留为 config.yaml 存储判别字段与 writer 分发键，磁盘格式不变。

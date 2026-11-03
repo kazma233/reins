@@ -1,9 +1,11 @@
 use std::collections::{BTreeMap, HashSet};
 use std::ffi::OsStr;
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::process::{Command, Stdio};
+use std::thread;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
@@ -47,6 +49,7 @@ use self::skills::git_cache_last_fetched_at_ms;
 #[cfg(windows)]
 use self::targets::read_directory_link_target;
 use self::targets::{builtin_target_defaults_map, project_agent_defaults};
+use crate::support::cancel::{CancelCheck, Cancelled};
 use crate::support::environment::Environment;
 // Windows 路径前缀剥离属于无业务语义的路径工具，实现统一在 support/fs.rs。
 // 模块级导入：inspect / 模板与测试模块都要用同一份实现。
@@ -720,28 +723,75 @@ fn hide_child_console(command: &mut Command) {
 #[cfg(not(windows))]
 fn hide_child_console(_command: &mut Command) {}
 
-fn run_command(command: &mut Command, context: &str) -> Result<()> {
+// 子进程退出状态的轮询间隔：取消延迟的上界，也是取消后 kill 的响应时间。
+const RUN_COMMAND_POLL_INTERVAL: Duration = Duration::from_millis(50);
+
+// stdio 与 Command::output() 对齐：stdin 关闭（git 不会停下来等凭据输入），
+// stdout/stderr 管道捕获。管道必须由排空线程持续读取，否则子进程输出塞满
+// 缓冲区后会卡住，轮询永远等不到退出。
+fn drain_pipe(pipe: Option<impl Read + Send + 'static>) -> thread::JoinHandle<Vec<u8>> {
+    thread::spawn(move || {
+        let mut buffer = Vec::new();
+        if let Some(mut pipe) = pipe {
+            let _ = pipe.read_to_end(&mut buffer);
+        }
+        buffer
+    })
+}
+
+// 执行外部命令并允许协作式取消：取消时 kill 子进程并以 Cancelled 错误返回。
+// 已退出的子进程收到取消同样按取消处理——调用方靠它跳过后续收尾（如写 marker）。
+// pub(crate)：取消行为（kill 与 Cancelled 错误）由集成测试直接验证。
+pub(crate) fn run_command(
+    command: &mut Command,
+    context: &str,
+    cancel: &CancelCheck,
+) -> Result<()> {
     hide_child_console(command);
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
 
-    let output = command
-        .output()
+    let mut child = command
+        .spawn()
         .with_context(|| format!("{context}：无法执行命令"))?;
+    let stdout = drain_pipe(child.stdout.take());
+    let stderr = drain_pipe(child.stderr.take());
 
-    if output.status.success() {
+    let status = loop {
+        if cancel.is_cancelled() {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(Cancelled.into());
+        }
+        if let Some(status) = child
+            .try_wait()
+            .with_context(|| format!("{context}：无法执行命令"))?
+        {
+            break status;
+        }
+        thread::sleep(RUN_COMMAND_POLL_INTERVAL);
+    };
+
+    let stdout_bytes = stdout.join().unwrap_or_default();
+    let stderr_bytes = stderr.join().unwrap_or_default();
+
+    if status.success() {
         return Ok(());
     }
 
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let stderr = String::from_utf8_lossy(&stderr_bytes).trim().to_string();
+    let stdout = String::from_utf8_lossy(&stdout_bytes).trim().to_string();
     let message = if !stderr.is_empty() {
         stderr
     } else if !stdout.is_empty() {
         stdout
     } else {
-        format!("exit status {}", output.status)
+        format!("exit status {status}")
     };
 
-    bail!("{context}：{message}");
+    bail!("{context}：{message}")
 }
 
 fn remove_existing_path(path: &Path) -> Result<()> {
@@ -890,3 +940,7 @@ mod config_tests;
 #[cfg(test)]
 #[path = "../tests/workspace_dsh.rs"]
 mod dsh_tests;
+
+#[cfg(test)]
+#[path = "../tests/workspace_fetch_cancel.rs"]
+mod fetch_cancel_tests;

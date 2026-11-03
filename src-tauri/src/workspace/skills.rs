@@ -13,6 +13,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use walkdir::WalkDir;
 
 use crate::state::skill_discovery::SkillDiscoveryState;
+use crate::support::cancel::{CancelCheck, Cancelled};
 use crate::support::environment::Environment;
 
 use super::WorkspaceConfigStore;
@@ -36,6 +37,7 @@ use super::{
 fn discover_source_skills_raw(
     store: &WorkspaceConfigStore,
     source: &ResolvedSkillSourceDefinition,
+    cancel: &CancelCheck,
 ) -> Result<(PathBuf, Vec<DiscoveredSkill>)> {
     match source {
         ResolvedSkillSourceDefinition::Local { root_path, .. } => {
@@ -43,9 +45,9 @@ fn discover_source_skills_raw(
             Ok((root_path.clone(), skills))
         }
         ResolvedSkillSourceDefinition::Git { repo, r#ref, .. } => {
-            let cache = clone_git_repo_to_cache(store, repo, r#ref.as_deref())?;
-            let skills = discover_skills_in_directory(&cache)?;
-            Ok((cache, skills))
+            let cache = clone_git_repo_to_cache(store, repo, r#ref.as_deref(), cancel)?;
+            let skills = discover_skills_in_directory(&cache.cache_dir)?;
+            Ok((cache.cache_dir, skills))
         }
     }
 }
@@ -237,10 +239,11 @@ fn classify_skill_link(
 pub(crate) fn build_sync_skill_options(
     store: &WorkspaceConfigStore,
     source_id: &str,
+    cancel: &CancelCheck,
 ) -> Result<SyncSkillOptionsResult> {
     let config = store.parse()?;
     let source_definition = source_definition_from_config(&config, source_id)?;
-    let (source_root, skills) = discover_source_skills_raw(store, source_definition)?;
+    let (source_root, skills) = discover_source_skills_raw(store, source_definition, cancel)?;
     let (name_patterns, path_patterns) = include_patterns_of(source_definition);
 
     Ok(SyncSkillOptionsResult {
@@ -359,7 +362,8 @@ fn source_sync_snapshot(
                 .collect::<Result<Vec<_>>>()?;
             Ok((source_root, discovered))
         }
-        _ => discover_source_skills_raw(store, source),
+        // 同步命令带着弹窗快照走到这里时没有网络拉取可取消。
+        _ => discover_source_skills_raw(store, source, &CancelCheck::never()),
     }
 }
 
@@ -503,10 +507,7 @@ pub(crate) fn skill_description_from_contents(contents: &str) -> Option<String> 
     let front_matter = serde_yaml::from_str::<serde_yaml::Value>(&front_matter).ok()?;
     let description = front_matter.get("description")?.as_str()?;
     // 折叠 YAML 多行标量的换行与连续空白，备注按单行展示。
-    let single_line = description
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
+    let single_line = description.split_whitespace().collect::<Vec<_>>().join(" ");
     if single_line.is_empty() {
         return None;
     }
@@ -577,9 +578,10 @@ pub(crate) fn discover_git_skills_inner(
     repo: &str,
     reference: Option<&str>,
 ) -> Result<SkillDiscoveryResultView> {
-    let cache = clone_git_repo_to_cache(store, repo, reference)?;
+    // 导入弹窗尚未接入取消机制；走 never 检查即不可取消。
+    let cache = clone_git_repo_to_cache(store, repo, reference, &CancelCheck::never())?;
     let discovery_id = uuid::Uuid::new_v4().to_string();
-    let skills = discover_skills_in_directory(&cache)?;
+    let skills = discover_skills_in_directory(&cache.cache_dir)?;
 
     state.store(
         discovery_id.clone(),
@@ -818,8 +820,14 @@ fn import_git_source(
 ) -> Result<BatchGitSkillImportItemResult> {
     let name_patterns = source.include_name_patterns.clone();
     let path_patterns = source.include_path_patterns.clone();
-    let cache = clone_git_repo_to_cache(store, &source.repo, Some(&source.r#ref))?;
-    let mut discovered = discover_skills_in_directory(&cache)?;
+    // 批量导入尚未接入取消机制；走 never 检查即不可取消。
+    let cache = clone_git_repo_to_cache(
+        store,
+        &source.repo,
+        Some(&source.r#ref),
+        &CancelCheck::never(),
+    )?;
+    let mut discovered = discover_skills_in_directory(&cache.cache_dir)?;
     apply_include_patterns(&mut discovered, &name_patterns, &path_patterns);
     let source_id = uuid::Uuid::new_v4().to_string();
     let skill_names = discovered
@@ -1154,28 +1162,61 @@ fn discovery_source_to_raw_definition(
     }
 }
 
+// 一次缓存解析的结果：cache_dir 指向可用的本地缓存；fetch_cancelled 说明
+// 远端刷新被取消、缓存停留在旧内容（marker 未写，下次仍会重试远端）。
+pub(crate) struct GitCacheRefresh {
+    pub(crate) cache_dir: PathBuf,
+    pub(crate) fetch_cancelled: bool,
+}
+
 // Resolve the persistent cache for normal discovery. Existing caches are only
 // refreshed after the interval expires, so opening the workspace stays local.
+// 刷新被取消时退回现有缓存（哪怕过期）：本地数据是真实的，只是可能落后。
 fn clone_git_repo_to_cache(
     store: &WorkspaceConfigStore,
     repo: &str,
     reference: Option<&str>,
-) -> Result<PathBuf> {
-    refresh_git_repo_cache(store, repo, reference, GitCacheRefreshPolicy::IfStale)
+    cancel: &CancelCheck,
+) -> Result<GitCacheRefresh> {
+    refresh_git_repo_cache(
+        store,
+        repo,
+        reference,
+        GitCacheRefreshPolicy::IfStale,
+        cancel,
+    )
 }
 
 pub(crate) fn refresh_git_skill_source_inner(
     store: &WorkspaceConfigStore,
     source_id: &str,
-) -> Result<()> {
+    cancel: &CancelCheck,
+) -> Result<SkillSourceRefreshResult> {
     let config = store.parse()?;
     let source = source_definition_from_config(&config, source_id)?;
     let ResolvedSkillSourceDefinition::Git { repo, r#ref, .. } = source else {
         bail!("来源不是 git：{source_id}");
     };
 
-    refresh_git_repo_cache(store, repo, r#ref.as_deref(), GitCacheRefreshPolicy::Force)?;
-    Ok(())
+    let refreshed = match refresh_git_repo_cache(
+        store,
+        repo,
+        r#ref.as_deref(),
+        GitCacheRefreshPolicy::Force,
+        cancel,
+    ) {
+        Ok(refreshed) => refreshed,
+        // 首次克隆被取消：没有本地缓存可用，但对「强制拉取」本身而言就是
+        // 未完成而已，如实报取消而不是错误。
+        Err(error) if error.is::<Cancelled>() => {
+            return Ok(SkillSourceRefreshResult { cancelled: true });
+        }
+        Err(error) => return Err(error),
+    };
+
+    Ok(SkillSourceRefreshResult {
+        cancelled: refreshed.fetch_cancelled,
+    })
 }
 
 fn refresh_git_repo_cache(
@@ -1183,7 +1224,8 @@ fn refresh_git_repo_cache(
     repo: &str,
     reference: Option<&str>,
     policy: GitCacheRefreshPolicy,
-) -> Result<PathBuf> {
+    cancel: &CancelCheck,
+) -> Result<GitCacheRefresh> {
     let cache_dir = store.git_cache_dir_for_repo(repo)?;
     fs::create_dir_all(store.git_cache_root())?;
 
@@ -1207,13 +1249,26 @@ fn refresh_git_repo_cache(
             );
 
         if should_refresh {
-            update_git_cache(&cache_dir, reference)?;
-            write_git_cache_refresh_marker(&cache_dir, reference)?;
+            match update_git_cache(&cache_dir, reference, cancel) {
+                Ok(()) => write_git_cache_refresh_marker(&cache_dir, reference)?,
+                // 取消不是失败：缓存原样可用，marker 不写（保持过期，下次重试）。
+                Err(error) if error.is::<Cancelled>() => {
+                    return Ok(GitCacheRefresh {
+                        cache_dir,
+                        fetch_cancelled: true,
+                    });
+                }
+                Err(error) => return Err(error),
+            }
         }
-        return Ok(cache_dir);
+        return Ok(GitCacheRefresh {
+            cache_dir,
+            fetch_cancelled: false,
+        });
     }
 
-    // Fresh clone.
+    // Fresh clone. 取消后 git 留下的半成品会让下一次更新当成已有仓库去
+    // fetch，必须清掉才能恢复干净重试。
     let mut clone_command = Command::new("git");
     clone_command.arg("clone");
 
@@ -1225,10 +1280,19 @@ fn refresh_git_repo_cache(
     }
 
     clone_command.arg(repo).arg(&cache_dir);
-    run_command(&mut clone_command, "拉取 git 仓库失败")?;
+    if let Err(error) = run_command(&mut clone_command, "拉取 git 仓库失败", cancel) {
+        if error.is::<Cancelled>() {
+            remove_existing_path(&cache_dir).context("已取消拉取，且清理未完成的仓库缓存失败")?;
+            return Err(error.context("已取消拉取，本地没有可用的仓库缓存。"));
+        }
+        return Err(error);
+    }
     write_git_cache_refresh_marker(&cache_dir, reference)?;
 
-    Ok(cache_dir)
+    Ok(GitCacheRefresh {
+        cache_dir,
+        fetch_cancelled: false,
+    })
 }
 
 fn git_cache_refresh_marker_path(cache_dir: &Path) -> PathBuf {
@@ -1276,7 +1340,7 @@ pub(super) fn git_cache_refresh_is_due(
     }
 }
 
-fn update_git_cache(cache_dir: &Path, reference: Option<&str>) -> Result<()> {
+fn update_git_cache(cache_dir: &Path, reference: Option<&str>, cancel: &CancelCheck) -> Result<()> {
     // Bare fetch then checkout handles both branches and tags; if the ref is
     // missing remotely the fetch/pull surfaces the git error to the user.
     run_command(
@@ -1285,6 +1349,7 @@ fn update_git_cache(cache_dir: &Path, reference: Option<&str>) -> Result<()> {
             .arg("fetch")
             .arg("origin"),
         "更新 git 仓库失败",
+        cancel,
     )?;
 
     if let Some(reference) = reference
@@ -1297,6 +1362,7 @@ fn update_git_cache(cache_dir: &Path, reference: Option<&str>) -> Result<()> {
                 .arg("checkout")
                 .arg(reference),
             "切换 git 分支失败",
+            cancel,
         )?;
     }
 
@@ -1306,6 +1372,7 @@ fn update_git_cache(cache_dir: &Path, reference: Option<&str>) -> Result<()> {
             .arg("pull")
             .arg("--ff-only"),
         "更新 git 仓库失败",
+        cancel,
     )
 }
 

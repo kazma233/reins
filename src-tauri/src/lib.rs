@@ -14,6 +14,7 @@ pub fn run() {
         .manage(providers::ProviderConfigStore::app())
         .manage(state::session_index::SessionIndexState::default())
         .manage(state::skill_discovery::SkillDiscoveryState::default())
+        .manage(state::skill_source_fetch::SkillSourceFetchCancelState::default())
         .invoke_handler(tauri::generate_handler![
             session::commands::detect_sources,
             session::commands::clear_session_caches,
@@ -58,6 +59,7 @@ pub fn run() {
             workspace::commands::remove_source_sync,
             workspace::commands::remove_target_skill_link,
             workspace::commands::refresh_git_skill_source,
+            workspace::commands::cancel_skill_source_fetch,
             workspace::commands::update_skill_source,
             providers::commands::get_providers_state,
             providers::commands::get_provider_app_state,

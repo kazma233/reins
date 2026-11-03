@@ -5,14 +5,15 @@ use tauri::async_runtime;
 
 use crate::logger;
 use crate::state::skill_discovery::SkillDiscoveryState;
+use crate::state::skill_source_fetch::SkillSourceFetchCancelState;
 use crate::support::environment::Environment;
 
 use super::{
     BatchGitSkillImportInput, BatchGitSkillImportResult, McpTargetMutationResult,
     McpTargetPreviewResult, McpTransport, ProjectMutationInput, RawMcpConfig, RawTargetInput,
-    SkillDiscoveryResultView, SkillSourceMutationInput, SkillSyncItem, SourceSyncConflict,
-    SourceSyncInput, SourceSyncResult, SyncSkillOptionsResult, SyncTargetOption,
-    WorkspaceConfigStore, WorkspaceMcpMutationResult, WorkspaceState,
+    SkillDiscoveryResultView, SkillSourceMutationInput, SkillSourceRefreshResult, SkillSyncItem,
+    SourceSyncConflict, SourceSyncInput, SourceSyncResult, SyncSkillOptionsResult,
+    SyncTargetOption, WorkspaceConfigStore, WorkspaceMcpMutationResult, WorkspaceState,
     WorkspaceTargetMutationResult, apply_mcp_to_target_inner, build_sync_skill_options,
     build_sync_target_options, create_workspace_mcp_inner, create_workspace_project_inner,
     create_workspace_target_inner, delete_skill_source_inner, delete_skill_sources_inner,
@@ -381,10 +382,12 @@ pub(crate) async fn get_sync_target_options(
 #[tauri::command]
 pub(crate) async fn get_sync_skill_options(
     store: tauri::State<'_, WorkspaceConfigStore>,
+    fetch_cancel: tauri::State<'_, SkillSourceFetchCancelState>,
     source_id: String,
 ) -> std::result::Result<SyncSkillOptionsResult, String> {
     let store = store.inner().clone();
-    run_blocking(move || build_sync_skill_options(&store, &source_id)).await
+    let cancel = fetch_cancel.begin();
+    run_blocking(move || build_sync_skill_options(&store, &source_id, &cancel)).await
 }
 
 #[tauri::command]
@@ -429,10 +432,20 @@ pub(crate) async fn remove_target_skill_link(
 #[tauri::command]
 pub(crate) async fn refresh_git_skill_source(
     store: tauri::State<'_, WorkspaceConfigStore>,
+    fetch_cancel: tauri::State<'_, SkillSourceFetchCancelState>,
     source_id: String,
-) -> std::result::Result<(), String> {
+) -> std::result::Result<SkillSourceRefreshResult, String> {
     let store = store.inner().clone();
-    run_blocking(move || refresh_git_skill_source_inner(&store, &source_id)).await
+    let cancel = fetch_cancel.begin();
+    run_blocking(move || refresh_git_skill_source_inner(&store, &source_id, &cancel)).await
+}
+
+// 取消当前在途的来源拉取：没有在途拉取时是无害的空操作。
+#[tauri::command]
+pub(crate) fn cancel_skill_source_fetch(
+    fetch_cancel: tauri::State<'_, SkillSourceFetchCancelState>,
+) {
+    fetch_cancel.cancel();
 }
 
 #[tauri::command]
