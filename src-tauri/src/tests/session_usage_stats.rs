@@ -11,7 +11,11 @@ struct TempHome {
 
 impl TempHome {
     fn new() -> Result<Self> {
-        let path = env::temp_dir().join(format!("reins-test-{}", Uuid::new_v4()));
+        // macOS 的 temp_dir() 返回 /var 别名,canonicalize 后是 /private/var;
+        // grokbuild 兄弟文件防线按 resolved != candidate 拦截符号链接,HOME
+        // 必须先归一到 canonical 形态才与生产一致(真实 HOME 无此别名)。
+        let base = crate::support::fs::canonicalize(&env::temp_dir())?;
+        let path = base.join(format!("reins-test-{}", Uuid::new_v4()));
         fs::create_dir_all(&path)?;
         Ok(Self { path })
     }
