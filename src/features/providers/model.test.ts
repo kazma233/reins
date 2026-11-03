@@ -14,6 +14,7 @@ import {
   mergeFetchedModels,
   normalizeProviderIdInput,
   protocolCompatible,
+  protocolIncompatibleTip,
   providerSyncPlan,
   reasoningEffortMappingText,
   reasoningEffortWrite,
@@ -64,6 +65,20 @@ describe("protocolCompatible", () => {
 
   it("returns true when the protocol is supported", () => {
     expect(protocolCompatible(appState(), provider())).toBe(true);
+  });
+});
+
+describe("protocolIncompatibleTip", () => {
+  it("names the provider protocol and the app's supported ones when incompatible", () => {
+    const app = appState({ supportedProtocols: ["openai_responses"] });
+    const incompatible = provider({ protocol: "anthropic_messages" });
+    expect(protocolIncompatibleTip(app, incompatible)).toBe(
+      "Codex 不支持协议 Anthropic Messages，支持：OpenAI Responses"
+    );
+  });
+
+  it("returns null when compatible so the tooltip stays hidden", () => {
+    expect(protocolIncompatibleTip(appState(), provider())).toBeNull();
   });
 });
 

@@ -5,6 +5,7 @@ import AppCard from "@shared/ui/AppCard.vue";
 import AppFieldError from "@shared/ui/AppFieldError.vue";
 import AppLoadError from "@shared/ui/AppLoadError.vue";
 import AppSelect from "@shared/ui/AppSelect.vue";
+import AppTooltip from "@shared/ui/AppTooltip.vue";
 import DialogShell from "@shared/ui/DialogShell.vue";
 import { applyProviderToApp, removeExternalEntry, removeProviderFromApp, setProviderAppReasoningLevel } from "../../api";
 import type {
@@ -20,6 +21,7 @@ import {
   ENTRY_STATUS_LABELS,
   applyCandidates,
   protocolCompatible,
+  protocolIncompatibleTip,
   protocolLabel,
   reasoningEffortMappingText,
   reapplyProvider,
@@ -336,20 +338,24 @@ function confirmRemove() {
           {{ appState.configExists ? "没有识别到聚合提供商条目。" : "未检测到配置文件。" }}
         </p>
 
-        <!-- 应用按钮放卡片最底部：提供商多时 flex-wrap 自动换行；候选为空（全部已应用）时整条隐藏 -->
+        <!-- 应用按钮放卡片最底部：提供商多时 flex-wrap 自动换行；候选为空（全部已应用）时整条隐藏。
+             协议不兼容的禁用按钮用 AppTooltip 说明原因：WKWebView 不显示禁用按钮的原生 title -->
         <template v-if="applyCandidates(appState, state.providers).length > 0" #footer>
           <span class="providers-app__actions-label">应用提供商</span>
-          <button
+          <AppTooltip
             v-for="provider in applyCandidates(appState, state.providers)"
             :key="`${appState.app}-apply-${provider.id}`"
-            class="secondary-button providers-app__chip"
-            :disabled="runningAction || !protocolCompatible(appState, provider)"
-            type="button"
-            :title="protocolCompatible(appState, provider) ? '' : '协议不兼容'"
-            @click="openApply(appState.app, provider.id)"
+            :tip="protocolIncompatibleTip(appState, provider) ?? ''"
           >
-            {{ provider.label }}
-          </button>
+            <button
+              class="secondary-button providers-app__chip"
+              :disabled="runningAction || !protocolCompatible(appState, provider)"
+              type="button"
+              @click="openApply(appState.app, provider.id)"
+            >
+              {{ provider.label }}
+            </button>
+          </AppTooltip>
         </template>
       </AppCard>
     </div>

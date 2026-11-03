@@ -86,6 +86,19 @@ export function protocolCompatible(appState: ProviderAppState, provider: Provide
   return appState.supportedProtocols.includes(provider.protocol);
 }
 
+// 应用按钮的 hover 提示：不兼容时说明原因（口径与后端协议校验一致），
+// 兼容时返回 null——禁用按钮在 WKWebView 不显示原生 title，提示走 AppTooltip。
+export function protocolIncompatibleTip(
+  appState: ProviderAppState,
+  provider: ProviderView
+): string | null {
+  if (protocolCompatible(appState, provider)) {
+    return null;
+  }
+  const supported = appState.supportedProtocols.map(protocolLabel).join("、");
+  return `${APP_LABELS[appState.app]} 不支持协议 ${protocolLabel(provider.protocol)}，支持：${supported}`;
+}
+
 // 应用弹窗的思考等级可选项：模型 reasoning_levels 与工具支持集取交集；
 // 模型未填等级时视为未约束，直接用工具支持集。为空表示该模型对这个
 // 工具没有可写等级（写入时省略字段）。
