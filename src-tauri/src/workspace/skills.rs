@@ -685,6 +685,7 @@ pub(crate) fn import_discovered_skills_inner(
     store: &WorkspaceConfigStore,
     state: &SkillDiscoveryState,
     discovery_id: &str,
+    description: Option<&str>,
     include_name_patterns: Option<&[String]>,
     include_path_patterns: Option<&[String]>,
 ) -> Result<SkillDiscoveryResultView> {
@@ -694,6 +695,11 @@ pub(crate) fn import_discovered_skills_inner(
     let source_id = uuid::Uuid::new_v4().to_string();
     let name_patterns = normalize_patterns(include_name_patterns.unwrap_or(&[]));
     let path_patterns = normalize_patterns(include_path_patterns.unwrap_or(&[]));
+    // 描述与批量导入同口径：trim 后为空按未填写处理。
+    let description = description
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string);
     let mut discovered = snapshot.skills.as_ref().to_vec();
     apply_include_patterns(&mut discovered, &name_patterns, &path_patterns);
 
@@ -706,6 +712,7 @@ pub(crate) fn import_discovered_skills_inner(
                 id: source_id.clone(),
                 source: discovery_source_to_raw_definition(
                     &snapshot.source,
+                    description,
                     name_patterns.clone(),
                     path_patterns.clone(),
                 ),
@@ -728,16 +735,16 @@ pub(crate) fn import_discovered_skills_inner(
 }
 
 pub(super) fn parse_batch_git_skill_import_sources(
-    yaml_content: &str,
+    json_content: &str,
 ) -> Result<Vec<BatchGitSkillImportSourceInput>> {
-    let trimmed = yaml_content.trim();
+    let trimmed = json_content.trim();
 
     if trimmed.is_empty() {
         bail!("批量导入内容不能为空。");
     }
 
-    let mut sources = serde_yaml::from_str::<Vec<BatchGitSkillImportSourceInput>>(trimmed)
-        .context("解析批量导入 YAML 失败")?;
+    let mut sources = serde_json::from_str::<Vec<BatchGitSkillImportSourceInput>>(trimmed)
+        .context("解析批量导入 JSON 失败")?;
 
     if sources.is_empty() {
         bail!("批量导入内容至少需要 1 个 git 来源。");
@@ -767,6 +774,13 @@ pub(super) fn parse_batch_git_skill_import_sources(
 
         source.repo = repo.to_string();
         source.r#ref = reference.to_string();
+        // 描述与 repo/ref 同口径：trim 后为空按未填写处理。
+        source.description = source
+            .description
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string);
         source.include_name_patterns = normalize_patterns(&source.include_name_patterns);
         source.include_path_patterns = normalize_patterns(&source.include_path_patterns);
     }
@@ -778,7 +792,7 @@ pub(crate) fn import_batch_git_skills_inner(
     store: &WorkspaceConfigStore,
     input: BatchGitSkillImportInput,
 ) -> Result<BatchGitSkillImportResult> {
-    let sources = parse_batch_git_skill_import_sources(&input.yaml_content)?;
+    let sources = parse_batch_git_skill_import_sources(&input.json_content)?;
 
     store.locked(|config| {
         let mut raw_config = config.parse_raw()?;
@@ -842,7 +856,7 @@ fn import_git_source(
             source: RawSkillSourceDefinition::Git {
                 repo: source.repo.clone(),
                 r#ref: Some(source.r#ref.clone()),
-                description: None,
+                description: source.description.clone(),
                 include_name_patterns: name_patterns.clone(),
                 include_path_patterns: path_patterns.clone(),
             },
@@ -1142,20 +1156,21 @@ fn discovery_source_ref(source: &DiscoverySourceDefinition) -> Option<String> {
 
 fn discovery_source_to_raw_definition(
     source: &DiscoverySourceDefinition,
+    description: Option<String>,
     include_name_patterns: Vec<String>,
     include_path_patterns: Vec<String>,
 ) -> RawSkillSourceDefinition {
     match source {
         DiscoverySourceDefinition::Local { root_path } => RawSkillSourceDefinition::Local {
             root_path: display_path(root_path),
-            description: None,
+            description,
             include_name_patterns,
             include_path_patterns,
         },
         DiscoverySourceDefinition::Git { repo, r#ref, .. } => RawSkillSourceDefinition::Git {
             repo: repo.clone(),
             r#ref: r#ref.clone(),
-            description: None,
+            description,
             include_name_patterns,
             include_path_patterns,
         },

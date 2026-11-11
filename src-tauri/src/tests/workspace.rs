@@ -579,15 +579,17 @@ fn remove_source_sync_reports_unreadable_target_directory() -> Result<()> {
 }
 
 #[test]
-fn parse_batch_git_skill_import_sources_requires_yaml_array() {
-    let result = parse_batch_git_skill_import_sources("repo: https://example.com/repo.git");
+fn parse_batch_git_skill_import_sources_requires_json_array() {
+    // 单个对象不是数组：批量导入的最小单位是一个来源列表。
+    let result =
+        parse_batch_git_skill_import_sources(r#"{"repo": "https://example.com/repo.git"}"#);
     assert!(result.is_err());
 }
 
 #[test]
 fn parse_batch_git_skill_import_sources_rejects_invalid_item() {
     let result = parse_batch_git_skill_import_sources(
-        "- repo: https://example.com/repo.git\n  include_name_patterns:\n    - ''\n",
+        r#"[{"repo": "https://example.com/repo.git", "ref": "main", "include_name_patterns": [""]}]"#,
     );
     assert!(result.is_err());
 }
@@ -595,15 +597,26 @@ fn parse_batch_git_skill_import_sources_rejects_invalid_item() {
 #[test]
 fn parse_batch_git_skill_import_sources_accepts_git_sources() -> Result<()> {
     let sources = parse_batch_git_skill_import_sources(
-        "- repo: https://example.com/repo.git\n  ref: main\n  include_name_patterns:\n    - archive/*\n",
+        r#"[{"repo": "https://example.com/repo.git", "ref": "main", "description": " 官方技能库 ", "include_name_patterns": ["archive/*"]}]"#,
     )?;
 
     assert_eq!(sources.len(), 1);
     let source = &sources[0];
     assert_eq!(source.repo, "https://example.com/repo.git");
     assert_eq!(source.r#ref, "main");
+    assert_eq!(source.description.as_deref(), Some("官方技能库"));
     assert_eq!(source.include_name_patterns, vec!["archive/*".to_string()]);
     Ok(())
+}
+
+#[test]
+fn parse_batch_git_skill_import_sources_folds_blank_description_to_none() {
+    let sources = parse_batch_git_skill_import_sources(
+        r#"[{"repo": "https://example.com/repo.git", "ref": "main", "description": "   "}]"#,
+    )
+    .expect("blank description is accepted");
+
+    assert_eq!(sources[0].description, None);
 }
 
 #[test]

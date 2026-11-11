@@ -4,11 +4,13 @@ import { refDebounced } from "@vueuse/core";
 import SkillSourceGroup from "../SkillSourceGroup.vue";
 import SkillImportDialog from "../dialogs/SkillImportDialog.vue";
 import SkillSourceEditDialog from "../dialogs/SkillSourceEditDialog.vue";
+import SkillSourceExportDialog from "../dialogs/SkillSourceExportDialog.vue";
 import SourceSyncDialog from "../dialogs/SourceSyncDialog.vue";
 import ConfirmDialog from "@shared/ui/ConfirmDialog.vue";
 import AppLoadError from "@shared/ui/AppLoadError.vue";
 import { formatTargetLabel } from "../../model";
 import { buildSkillLinkSourceLabels } from "../../syncAssociations";
+import type { SkillSourceConfigView } from "../../types";
 import type { WorkspaceStateContext } from "../../composables/useWorkspaceState";
 import { useSkillImport } from "../../composables/useSkillImport";
 import { useSkillSourceEdit } from "../../composables/useSkillSourceEdit";
@@ -41,6 +43,7 @@ const {
   openImportDialog,
   closeImportDialog,
   scanGitSkills,
+  selectBatchImportFile,
   selectLocalDirectory,
   handleImportSkills,
 } = useSkillImport(props.workspace);
@@ -69,6 +72,20 @@ const {
 } = useSourceSync(props.workspace);
 
 // --- local filter state ---
+
+// 导出弹窗是纯展示（无 API 调用），状态留在 panel 本地。
+const skillSourceExportDialog = ref<{ open: boolean; sources: SkillSourceConfigView[] }>({
+  open: false,
+  sources: [],
+});
+
+function openSkillSourceExportDialog(sources: SkillSourceConfigView[]) {
+  skillSourceExportDialog.value = { open: true, sources };
+}
+
+function closeSkillSourceExportDialog() {
+  skillSourceExportDialog.value = { open: false, sources: [] };
+}
 
 const skillNameFilter = ref("");
 const debouncedSkillNameFilter = refDebounced(skillNameFilter, 200);
@@ -138,9 +155,11 @@ const remoteSources = computed(() =>
                 heading-id="remote-skills-heading"
                 :loading="runningAction"
                 :sources="remoteSources"
+                exportable
                 @edit="openSkillSourceEditDialog"
                 @delete="openSkillSourceDeleteDialog"
                 @sync="handleOpenSourceSync"
+                @export="openSkillSourceExportDialog"
               />
             </div>
           </template>
@@ -158,6 +177,7 @@ const remoteSources = computed(() =>
       @close="closeImportDialog"
       @confirm="handleImportSkills"
       @discover-git-skills="scanGitSkills"
+      @pick-batch-import-file="selectBatchImportFile"
       @pick-local-skill-directory="selectLocalDirectory"
     />
 
@@ -170,6 +190,12 @@ const remoteSources = computed(() =>
       @close="closeSkillSourceEditDialog"
       @confirm="handleConfirmSkillSourceEdit"
       @refresh-preview="handleRefreshSkillSourceEditPreview"
+    />
+
+    <SkillSourceExportDialog
+      :open="skillSourceExportDialog.open"
+      :sources="skillSourceExportDialog.sources"
+      @close="closeSkillSourceExportDialog"
     />
 
     <ConfirmDialog

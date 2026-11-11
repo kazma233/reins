@@ -17,6 +17,7 @@ export * from "./McpTransport";
 export * from "./ProjectConfigView";
 export * from "./ProjectInspection";
 export * from "./ProjectMutationInput";
+export * from "./SkillBatchImportFile";
 export * from "./SkillDiscoveryResultView";
 export * from "./SkillLinkAssociation";
 export * from "./SkillLinkState";

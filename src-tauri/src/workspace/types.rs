@@ -95,6 +95,16 @@ pub(crate) struct WorkspaceSelection {
     pub(crate) workspace_dir: String,
 }
 
+// 批量导入文件选择的返回：路径用于界面展示，内容直接由 Rust 侧读出，
+// 前端不再另发读文件请求（也没有读任意路径的通用 command）。
+#[derive(Clone, Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/features/workspace/generated/")]
+pub(crate) struct SkillBatchImportFile {
+    pub(crate) path: String,
+    pub(crate) content: String,
+}
+
 #[derive(Clone, Debug, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/features/workspace/generated/")]
@@ -117,7 +127,7 @@ pub(crate) struct SkillSourceMutationInput {
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/features/workspace/generated/")]
 pub(crate) struct BatchGitSkillImportInput {
-    pub(crate) yaml_content: String,
+    pub(crate) json_content: String,
 }
 
 #[derive(Clone, Debug, Serialize, TS)]
@@ -448,6 +458,8 @@ pub(crate) struct SkillDiscoveryResultView {
 pub(crate) struct BatchGitSkillImportSourceInput {
     pub(crate) repo: String,
     pub(crate) r#ref: String,
+    #[serde(default)]
+    pub(crate) description: Option<String>,
     #[serde(default)]
     pub(crate) include_name_patterns: Vec<String>,
     #[serde(default)]

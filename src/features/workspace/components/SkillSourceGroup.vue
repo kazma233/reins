@@ -7,14 +7,20 @@ type SkillSourceGroupProps = {
   headingId: string;
   sources: SkillSourceConfigView[];
   loading: boolean;
+  // 导出入口挂在组头部，一次导出整组（批量导入 JSON 是来源数组）；
+  // 只有远端组启用——本地来源不在批量导入的能力范围内。
+  exportable?: boolean;
 };
 
-defineProps<SkillSourceGroupProps>();
+withDefaults(defineProps<SkillSourceGroupProps>(), {
+  exportable: false,
+});
 
 defineEmits<{
   edit: [source: SkillSourceConfigView];
   delete: [source: SkillSourceConfigView];
   sync: [source: SkillSourceConfigView];
+  export: [sources: SkillSourceConfigView[]];
 }>();
 </script>
 
@@ -22,7 +28,18 @@ defineEmits<{
   <section v-if="sources.length" class="manager-skill-source-group" :aria-labelledby="headingId">
     <header class="manager-skill-source-group__header">
       <h2 :id="headingId">{{ heading }}</h2>
-      <span>{{ sources.length }} 项</span>
+      <div class="manager-skill-source-group__meta">
+        <span>{{ sources.length }} 项</span>
+        <button
+          v-if="exportable"
+          class="secondary-button manager-skill-source-group__export"
+          :disabled="loading"
+          type="button"
+          @click="$emit('export', sources)"
+        >
+          导出 JSON
+        </button>
+      </div>
     </header>
     <div class="manager-skill-source-group__list">
       <SourceRow

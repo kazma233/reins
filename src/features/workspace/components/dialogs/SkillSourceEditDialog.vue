@@ -76,6 +76,16 @@ function handlePathPatternsInput(value: string) {
     <div class="manager-import-shell manager-import-shell--compact">
       <AppFieldError :message="error" />
 
+      <label class="manager-field">
+        <span>描述</span>
+        <input
+          placeholder="一句话说明这个来源的用途，会显示在列表标题"
+          :value="state.description"
+          type="text"
+          @input="handleDescriptionInput"
+        />
+      </label>
+
       <template v-if="state.sourceType === 'git'">
         <div class="manager-import-row manager-import-row--git-source">
           <label class="manager-field manager-import-row__field manager-import-row__field--repo">
@@ -94,16 +104,6 @@ function handlePathPatternsInput(value: string) {
           <input readonly :value="state.rootPath" type="text" />
         </label>
       </template>
-
-      <label class="manager-field">
-        <span>描述</span>
-        <input
-          placeholder="一句话说明这个来源的用途，会显示在列表标题"
-          :value="state.description"
-          type="text"
-          @input="handleDescriptionInput"
-        />
-      </label>
 
       <div class="manager-import-row manager-import-row--include-patterns">
         <label class="manager-field manager-import-row__field">

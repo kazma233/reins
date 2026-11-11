@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { AGENT_IDS } from "@shared/lib/agent-labels";
 import {
+  buildSkillSourcesBatchJson,
   DEFAULT_PROJECT_FORM,
   formatTargetId,
   formatTargetLabel,
@@ -8,7 +9,7 @@ import {
   groupTargetIds,
   parseTargetId,
 } from "./model";
-import type { AgentTargetId } from "./types";
+import type { AgentTargetId, SkillSourceConfigView } from "./types";
 
 describe("groupTargetIds", () => {
   it("puts global targets first and each project in its own group", () => {
@@ -103,5 +104,62 @@ describe("formatTargetName", () => {
 describe("DEFAULT_PROJECT_FORM", () => {
   it("starts without any agent enabled", () => {
     expect(DEFAULT_PROJECT_FORM.agents).toEqual([]);
+  });
+});
+
+describe("buildSkillSourcesBatchJson", () => {
+  const gitSource: SkillSourceConfigView = {
+    type: "git",
+    id: "s1",
+    repo: "https://github.com/anthropics/skills.git",
+    ref: "main",
+    description: "anthropics/skills",
+    includeNamePatterns: ["agent-*"],
+    includePathPatterns: ["python/*"],
+    label: "anthropics/skills",
+  };
+  const localSource: SkillSourceConfigView = {
+    type: "local",
+    id: "s2",
+    rootPath: "~/skills",
+    description: null,
+    includeNamePatterns: [],
+    includePathPatterns: [],
+    label: "~/skills",
+  };
+
+  it("serializes git sources into the batch import json schema", () => {
+    const secondGit: SkillSourceConfigView = {
+      ...gitSource,
+      id: "s3",
+      repo: "https://example.com/repo.git",
+      ref: null,
+      description: "  示例仓库  ",
+      includeNamePatterns: [],
+      includePathPatterns: [],
+    };
+    expect(buildSkillSourcesBatchJson([gitSource, localSource, secondGit])).toBe(
+      JSON.stringify(
+        [
+          {
+            repo: "https://github.com/anthropics/skills.git",
+            ref: "main",
+            description: "anthropics/skills",
+            include_name_patterns: ["agent-*"],
+            include_path_patterns: ["python/*"],
+          },
+          // local 来源被过滤；第二个 git 来源描述 trim 后写入、
+          // 空 patterns 省略键、ref 按行内展示口径补 main
+          { repo: "https://example.com/repo.git", ref: "main", description: "示例仓库" },
+        ],
+        null,
+        2,
+      ),
+    );
+  });
+
+  it("returns null when no git source is present", () => {
+    expect(buildSkillSourcesBatchJson([localSource])).toBeNull();
+    expect(buildSkillSourcesBatchJson([])).toBeNull();
   });
 });

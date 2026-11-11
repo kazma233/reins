@@ -11,21 +11,22 @@ use crate::support::environment::Environment;
 use super::{
     BatchGitSkillImportInput, BatchGitSkillImportResult, McpTargetMutationResult,
     McpTargetPreviewResult, McpTransport, ProjectMutationInput, RawMcpConfig, RawTargetInput,
-    SkillDiscoveryResultView, SkillSourceMutationInput, SkillSourceRefreshResult, SkillSyncItem,
-    SourceSyncConflict, SourceSyncInput, SourceSyncResult, SyncSkillOptionsResult,
-    SyncTargetOption, WorkspaceConfigStore, WorkspaceMcpMutationResult, WorkspaceState,
-    WorkspaceTargetMutationResult, apply_mcp_to_target_inner, build_sync_skill_options,
-    build_sync_target_options, create_workspace_mcp_inner, create_workspace_project_inner,
-    create_workspace_target_inner, delete_skill_source_inner, delete_skill_sources_inner,
-    delete_workspace_mcp_inner, delete_workspace_project_inner, delete_workspace_target_inner,
-    discover_git_skills_inner, discover_local_skills_inner, filter_discovered_skills_inner,
-    import_batch_git_skills_inner, import_discovered_skills_inner, preview_mcp_target_inner,
-    preview_source_sync_conflicts_inner, refresh_git_skill_source_inner,
+    SkillBatchImportFile, SkillDiscoveryResultView, SkillSourceMutationInput,
+    SkillSourceRefreshResult, SkillSyncItem, SourceSyncConflict, SourceSyncInput, SourceSyncResult,
+    SyncSkillOptionsResult, SyncTargetOption, WorkspaceConfigStore, WorkspaceMcpMutationResult,
+    WorkspaceState, WorkspaceTargetMutationResult, apply_mcp_to_target_inner,
+    build_sync_skill_options, build_sync_target_options, create_workspace_mcp_inner,
+    create_workspace_project_inner, create_workspace_target_inner, delete_skill_source_inner,
+    delete_skill_sources_inner, delete_workspace_mcp_inner, delete_workspace_project_inner,
+    delete_workspace_target_inner, discover_git_skills_inner, discover_local_skills_inner,
+    filter_discovered_skills_inner, import_batch_git_skills_inner, import_discovered_skills_inner,
+    preview_mcp_target_inner, preview_source_sync_conflicts_inner, refresh_git_skill_source_inner,
     remove_mcp_from_target_inner, remove_source_sync_inner, remove_target_skill_link_inner,
     select_local_skill_source_directory_inner, select_project_path_inner,
-    select_target_mcp_config_file_inner, select_target_skill_directory_inner,
-    sync_source_to_targets_inner, update_skill_source_inner, update_workspace_mcp_inner,
-    update_workspace_project_inner, update_workspace_target_inner, workspace_state_inner,
+    select_skill_batch_import_file_inner, select_target_mcp_config_file_inner,
+    select_target_skill_directory_inner, sync_source_to_targets_inner, update_skill_source_inner,
+    update_workspace_mcp_inner, update_workspace_project_inner, update_workspace_target_inner,
+    workspace_state_inner,
 };
 
 #[tauri::command]
@@ -53,6 +54,12 @@ pub(crate) async fn select_local_skill_source_directory(
     source_path: Option<String>,
 ) -> std::result::Result<Option<super::WorkspaceSelection>, String> {
     run_blocking(move || select_local_skill_source_directory_inner(source_path.as_deref())).await
+}
+
+#[tauri::command]
+pub(crate) async fn select_skill_batch_import_file()
+-> std::result::Result<Option<SkillBatchImportFile>, String> {
+    run_blocking(select_skill_batch_import_file_inner).await
 }
 
 #[tauri::command]
@@ -145,6 +152,7 @@ pub(crate) async fn import_discovered_skills(
     store: tauri::State<'_, WorkspaceConfigStore>,
     state: tauri::State<'_, SkillDiscoveryState>,
     discovery_id: String,
+    description: Option<String>,
     include_name_patterns: Option<Vec<String>>,
     include_path_patterns: Option<Vec<String>>,
 ) -> std::result::Result<SkillDiscoveryResultView, String> {
@@ -155,6 +163,7 @@ pub(crate) async fn import_discovered_skills(
             &store,
             &state,
             &discovery_id,
+            description.as_deref(),
             include_name_patterns.as_deref(),
             include_path_patterns.as_deref(),
         )

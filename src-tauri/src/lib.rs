@@ -31,6 +31,7 @@ pub fn run() {
             workspace::commands::select_local_skill_source_directory,
             workspace::commands::select_target_skill_directory,
             workspace::commands::select_target_mcp_config_file,
+            workspace::commands::select_skill_batch_import_file,
             workspace::commands::discover_git_skills,
             workspace::commands::discover_local_skills,
             workspace::commands::filter_discovered_skills,

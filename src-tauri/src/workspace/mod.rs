@@ -315,6 +315,24 @@ pub(crate) fn select_target_skill_directory_inner(
     pick_folder(path)
 }
 
+// 批量导入 JSON 文件：选完即读出内容一并返回，前端不再有读任意路径的通道。
+pub(crate) fn select_skill_batch_import_file_inner() -> Result<Option<SkillBatchImportFile>> {
+    let Some(file) = rfd::FileDialog::new()
+        .add_filter("JSON", &["json"])
+        .pick_file()
+    else {
+        return Ok(None);
+    };
+
+    let content = std::fs::read_to_string(&file)
+        .with_context(|| format!("读取批量导入文件失败：{}", display_path(&file)))?;
+
+    Ok(Some(SkillBatchImportFile {
+        path: display_path(&file),
+        content,
+    }))
+}
+
 // 测试与 inspect 用的 home 口径：与 expand_path / 清单解析同源。
 #[cfg(test)]
 pub(super) fn user_home_dir() -> Option<PathBuf> {

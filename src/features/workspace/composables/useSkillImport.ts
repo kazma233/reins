@@ -3,6 +3,7 @@ import {
   importBatchGitSkills,
   importDiscoveredSkills,
   selectLocalSkillSourceDirectory,
+  selectSkillBatchImportFile,
 } from "../api";
 import {
   createSkillImportDialogState,
@@ -11,11 +12,16 @@ import {
 } from "../model";
 import { useSkillPreview, type SkillSourcePreviewInput } from "./useSkillPreview";
 import { useWorkspaceAction } from "./useWorkspaceAction";
+import type { SkillSourceKind } from "../types";
 import type { WorkspaceStateContext } from "./useWorkspaceState";
 
-function buildImportSourcePreviewInput(dialog: SkillImportDialogState): SkillSourcePreviewInput {
+// batch-git 不产生 discovery 预览，调用方保证只在 git/local 分支传入对应 kind。
+function buildImportSourcePreviewInput(
+  dialog: SkillImportDialogState,
+  sourceType: SkillSourceKind,
+): SkillSourcePreviewInput {
   return {
-    sourceType: dialog.sourceType,
+    sourceType,
     repo: dialog.repo,
     rootPath: dialog.rootPath,
     ref: dialog.ref,
@@ -30,17 +36,17 @@ export function useSkillImport(workspace: WorkspaceStateContext) {
     useSkillPreview(skillImportDialog);
 
   function openImportDialog() {
-    Object.assign(skillImportDialog, createSkillImportDialogState(skillImportDialog.sourceType));
+    Object.assign(skillImportDialog, createSkillImportDialogState(skillImportDialog.sourceKind));
     skillImportDialog.open = true;
   }
 
   function closeImportDialog() {
     invalidatePreviewRequests();
-    Object.assign(skillImportDialog, createSkillImportDialogState(skillImportDialog.sourceType));
+    Object.assign(skillImportDialog, createSkillImportDialogState(skillImportDialog.sourceKind));
   }
 
   async function scanGitSkills() {
-    const source = buildImportSourcePreviewInput(skillImportDialog);
+    const source = buildImportSourcePreviewInput(skillImportDialog, "git");
     // Reset preview so the loading state is visible while discovery runs.
     clearPreview();
 
@@ -56,18 +62,36 @@ export function useSkillImport(workspace: WorkspaceStateContext) {
     });
   }
 
+  // 选择批量导入 JSON 文件：内容直接填入编辑框，选后仍可手动微调再导入。
+  async function selectBatchImportFile() {
+    await runWorkspaceAction({
+      action: async () => {
+        const selected = await selectSkillBatchImportFile();
+        if (!selected) return;
+
+        skillImportDialog.batchFilePath = selected.path;
+        skillImportDialog.batchJsonText = selected.content;
+        skillImportDialog.batchResult = null;
+      },
+      error: "选择批量导入文件失败。",
+      onError: (message) => {
+        skillImportDialog.preview.previewError = message;
+      },
+    });
+  }
+
   async function selectLocalDirectory() {
     await runWorkspaceAction({
       action: async () => {
         const selected = await selectLocalSkillSourceDirectory(skillImportDialog.rootPath);
         if (!selected) return;
 
-        skillImportDialog.sourceType = "local";
+        skillImportDialog.sourceKind = "local";
         skillImportDialog.rootPath = selected.workspaceDir;
         clearPreview();
 
         await discoverAndFilterSkills(
-          buildImportSourcePreviewInput(skillImportDialog),
+          buildImportSourcePreviewInput(skillImportDialog, "local"),
           skillImportDialog.preview.includeNamePatternsText,
           skillImportDialog.preview.includePathPatternsText,
         );
@@ -80,9 +104,9 @@ export function useSkillImport(workspace: WorkspaceStateContext) {
   }
 
   async function handleImportSkills() {
-    if (skillImportDialog.mode === "batch-git") {
+    if (skillImportDialog.sourceKind === "batch-git") {
       await runWorkspaceAction({
-        action: () => importBatchGitSkills(skillImportDialog.batchYamlText),
+        action: () => importBatchGitSkills(skillImportDialog.batchJsonText),
         reload: true,
         error: "导入 skills 失败。",
         onSuccess: (result) => {
@@ -101,14 +125,15 @@ export function useSkillImport(workspace: WorkspaceStateContext) {
     await runWorkspaceAction({
       action: async () => {
         const discoveryId = skillImportDialog.preview.discovery?.discoveryId ?? "";
+        const description = skillImportDialog.description.trim();
         const namePatterns = parseCommaSeparatedList(skillImportDialog.preview.includeNamePatternsText);
         const pathPatterns = parseCommaSeparatedList(skillImportDialog.preview.includePathPatternsText);
 
-        if (skillImportDialog.sourceType === "local" && !skillImportDialog.rootPath.trim()) {
+        if (skillImportDialog.sourceKind === "local" && !skillImportDialog.rootPath.trim()) {
           throw new Error("缺少本地来源目录。");
         }
 
-        return importDiscoveredSkills(discoveryId, namePatterns, pathPatterns);
+        return importDiscoveredSkills(discoveryId, description, namePatterns, pathPatterns);
       },
       reload: true,
       error: "导入 skills 失败。",
@@ -124,6 +149,7 @@ export function useSkillImport(workspace: WorkspaceStateContext) {
     openImportDialog,
     closeImportDialog,
     scanGitSkills,
+    selectBatchImportFile,
     selectLocalDirectory,
     handleImportSkills,
   };

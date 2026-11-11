@@ -7,6 +7,7 @@ import type {
   McpTargetPreviewResult,
   McpTargetMutationResult,
   BatchGitSkillImportResult,
+  SkillBatchImportFile,
   SkillDiscoveryResult,
   WorkspaceSelection,
   WorkspaceMcpMutationResult,
@@ -132,24 +133,30 @@ export function filterDiscoveredSkills(
 
 export function importDiscoveredSkills(
   discoveryId: string,
+  description?: string,
   includeNamePatterns?: string[],
   includePathPatterns?: string[]
 ): Promise<SkillDiscoveryResult> {
   return invoke("import_discovered_skills", {
     discoveryId,
+    description: description ?? null,
     includeNamePatterns: includeNamePatterns ?? null,
     includePathPatterns: includePathPatterns ?? null,
   });
 }
 
 export function importBatchGitSkills(
-  yamlContent: string
+  jsonContent: string
 ): Promise<BatchGitSkillImportResult> {
   return invoke("import_batch_git_skills", {
     input: {
-      yamlContent
+      jsonContent
     }
   });
+}
+
+export function selectSkillBatchImportFile(): Promise<SkillBatchImportFile | null> {
+  return invoke("select_skill_batch_import_file");
 }
 
 export function createWorkspaceTarget(
