@@ -13,7 +13,7 @@ Reins 是管理多个 AI CLI 编码工具的本地桌面应用（Tauri v2：Vue 
 - Rust `support/` 只放无业务语义工具，不接收业务域 DTO；`state/` 只放运行时缓存状态。
 - 每域 `commands.rs` 只做 Tauri command 入参与调度；providers 的适配器（`apps/`）只生成新文件内容，diff 预览与原子写入统一在 commands 层完成。
 
-会话域（`session/`）：`sources.rs` 是来源注册表——根目录、探测、缓存清理、删除策略、用量采集都由它驱动，新增来源 = 新读取器文件 + 一条注册。每来源恰好一个读取器，机械部分（缓存生命周期、失效判定、marker 注入、排序分页）共享 `reader_engine`，读取器只声明真差异；family 聚合的孤儿策略由 `OrphanPolicy` 显式声明，不得静默统一。
+会话域（`session/`）：`sources.rs` 是来源注册表——根目录、探测、缓存清理、用量采集都由它驱动，新增来源 = 新读取器文件 + 一条注册。每来源恰好一个读取器，机械部分（缓存生命周期、失效判定、marker 注入、排序分页）共享 `reader_engine`，读取器只声明真差异；family 聚合的孤儿策略由 `OrphanPolicy` 显式声明，不得静默统一。Reins 对会话只做统计查看分析，不提供删除（[决策记录](aidocs/decisions/2026-11-11-remove-session-deletion.md)）。
 
 ## 常用命令
 
@@ -28,7 +28,7 @@ cargo test --manifest-path src-tauri/Cargo.toml   # Rust 测试
 
 **收尾检查（改了代码就必须跑）**：改了 Rust 先 `cargo fmt --manifest-path src-tauri/Cargo.toml`，然后 `pnpm check` → `pnpm test` → `cargo test`，全绿才算改完。只出分析报告、不改代码的请求不适用本条。
 
-- Rust 测试必须全量跑：部分夹具依赖 bin 产物，`cargo test --lib` 会因定位不到 `reins-fake-cli` 而误报失败。
+- Rust 测试必须全量跑，不要用 `cargo test --lib` 截短（历史教训见[决策记录](aidocs/decisions/2026-10-12-test-env-lock-is-by-design.md)）。
 - 测试持 `test_env_lock` 串行是设计不是债——夹具覆写进程级 HOME 等环境变量，并行必然互踩，不要为并行化重构隔离机制（[决策记录](aidocs/decisions/2026-10-12-test-env-lock-is-by-design.md)）。
 
 ## 前后端契约

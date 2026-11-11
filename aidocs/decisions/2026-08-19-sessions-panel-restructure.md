@@ -1,7 +1,7 @@
 # sessions 前端对齐 workspace 结构（候选7）
 
 - 日期：2026-08-19
-- 状态：生效中（2026-09-22 起 `useSessionDetailActions` 只保留删除流，导入相关描述仅作历史记录）
+- 状态：生效中（2026-09-22 起 `useSessionDetailActions` 只保留删除流，导入相关描述仅作历史记录；2026-11-11 会话删除功能整体移除后该 composable 已删除，导入/删除相关描述均仅作历史记录）
 
 ## 背景
 

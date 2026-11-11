@@ -25,7 +25,3 @@
 ## dunce（仅 Windows）
 
 - Windows 上 `std::fs::canonicalize` 返回 `\\?\` verbatim 路径；统一走 `dunce` 取普通拼写。
-
-## default-run
-
-- 测试专用的假 CLI bin（`src/bin/reins-fake-cli.rs`）让包出现第二个 binary，`cargo run` 需要显式默认目标 `reins`。

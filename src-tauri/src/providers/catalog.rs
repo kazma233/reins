@@ -300,10 +300,7 @@ fn load_modelsdev_data(app_dir: &Path, force_refresh: bool) -> Result<JsonValue>
 // 错误文案按 `reqwest::Error::is_timeout / is_connect` 分支：
 // - 超时给「请求超时（>45s）」，能区分之前的「不是 JSON」误报；
 // - 真非 JSON 时把响应体开头带出来，便于判断上游返回了什么。
-pub(crate) fn fetch_modelsdev(
-    client: &reqwest::blocking::Client,
-    url: &str,
-) -> Result<JsonValue> {
+pub(crate) fn fetch_modelsdev(client: &reqwest::blocking::Client, url: &str) -> Result<JsonValue> {
     let response = client
         .get(url)
         .send()
@@ -317,7 +314,10 @@ pub(crate) fn fetch_modelsdev(
         .map_err(|err| describe_modelsdev_http_error("读取 models.dev 响应失败", &err))?;
     match serde_json::from_slice(&raw) {
         Ok(value) => Ok(value),
-        Err(_) => bail!("models.dev 返回的不是 JSON：{}", describe_non_json_body(&raw)),
+        Err(_) => bail!(
+            "models.dev 返回的不是 JSON：{}",
+            describe_non_json_body(&raw)
+        ),
     }
 }
 

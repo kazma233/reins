@@ -11,7 +11,9 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 use crate::session;
-use crate::session::model::{SessionEvent, SessionMessage, SessionModel, SessionSummary, SourceApp};
+use crate::session::model::{
+    SessionEvent, SessionMessage, SessionModel, SessionSummary, SourceApp,
+};
 use crate::state;
 use crate::support;
 use crate::test_support::TestEnvGuard;
@@ -22,8 +24,6 @@ mod family_chain;
 mod grokbuild;
 mod pi;
 mod session_cache;
-mod session_delete;
-mod session_delete_plan;
 mod session_engine;
 mod session_index;
 mod session_listing;

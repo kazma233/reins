@@ -15,8 +15,6 @@
 | `src/features/sessions/api.ts` | `src-tauri/src/session/commands.rs` | `get_session_messages` | 返回 `SessionMessagePage`；参数 `(sourceApp, sourceSessionId, offset, limit)`，`transcript_path` 参数已移除 |
 | `src/features/sessions/api.ts` | `src-tauri/src/session/commands.rs` | `get_session_events` | 返回 `SessionEventPage`；参数 `(sourceApp, sourceSessionId, offset, limit)`，`transcript_path` 参数已移除 |
 | `src/features/sessions/api.ts` | `src-tauri/src/session/commands.rs` | `get_session_agent_messages` | 参数 `(sourceApp, sourceSessionId, agentSessionId)`，`transcript_path` 参数已移除 |
-| `src/features/sessions/api.ts` | `src-tauri/src/session/commands.rs` | `get_delete_plan` | 返回 `DeletePlan`（删除预演：动作清单 + 说明文案，删除语义唯一真相在后端）；参数 `(sourceApp, sourceSessionId)`，`transcript_path` 参数已移除 |
-| `src/features/sessions/api.ts` | `src-tauri/src/session/commands.rs` | `delete_session` | 返回 `DeleteSessionResult`；参数 `(sourceApp, sourceSessionId)`，`transcript_path` 参数已移除 |
 
 ### Session 关键 DTO
 
@@ -29,8 +27,6 @@
 | `SessionEventPage` | `SessionEventPage` | `src-tauri/src/session/model.rs` |
 | `SessionPage` | `SessionPage` | `src-tauri/src/session/model.rs` |
 | `SessionRefreshResult` | `SessionRefreshResult` | `src-tauri/src/session/model.rs` |
-| `DeleteSessionResult` | `DeleteSessionResult` | `src-tauri/src/session/model.rs` |
-| `DeletePlan` | `DeletePlan` | `src-tauri/src/session/model.rs` |
 
 ## Workspace
 
@@ -93,3 +89,4 @@
 - 2026-06-04 增补：`delete_skill_source` / `delete_skill_sources` 与 `SkillSourceManageDialog` 一同引入，详见 `2026-06-04-skill-source-management.md`。
 - 2026-11-03 增补：`refresh_git_skill_source` 返回值从 `void` 变为 `SkillSourceRefreshResult`；新增 `cancel_skill_source_fetch`（来源 git 拉取取消），详见 `2026-11-03-skill-source-fetch-cancellation.md`。
 - 2026-10-08 变更：移除自定义 target 创建能力。新增 `get_target_presets`（`TargetPreset[]`，AgentSpec 派生下发）；`create_workspace_target` 收紧为七个内置 id 且 MCP 格式由后端派生。`McpConfigType` 从契约面退役：ts 不再导出，`create/update_workspace_target` 参数与 `TargetPreset` 均不携带，target 视图以 `mcp_format_description`（格式 writer 的中文说明）代替类型暴露；Rust 枚举保留为 config.yaml 存储判别字段与 writer 分发键，磁盘格式不变。
+- 2026-11-11 变更：会话删除功能整体移除，`get_delete_plan` / `delete_session` 两个 command 与 `DeletePlan` / `DeletePlanAction` / `DeleteSessionResult` 三个 DTO 从契约面退役，详见 `2026-11-11-remove-session-deletion.md`。

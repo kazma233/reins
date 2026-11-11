@@ -14,10 +14,9 @@ use super::family_index::{Family, FamilyIndex, FamilyRow};
 use super::family_timeline::{FamilyAgentLabel, family_agents};
 use super::reader_engine::{self, MemberTimeline};
 use super::{
-    ContentBlock, DeletePlanAction, ModelTally, SessionEvent,
-    SessionFileEntry, SessionMessage, SessionModel, SessionOverview,
-    SessionReader, SessionSummary, SessionTokenUsage, SourceApp, SummaryAccumulator,
-    UsageHourBuckets, delete::DeletePlanInput,
+    ContentBlock, ModelTally, SessionEvent, SessionFileEntry, SessionMessage, SessionModel,
+    SessionOverview, SessionReader, SessionSummary, SessionTokenUsage, SourceApp,
+    SummaryAccumulator, UsageHourBuckets,
 };
 
 /// 按 sessions 根构造的读取器：持有该根下的全部缓存。
@@ -87,9 +86,6 @@ struct PiRow {
     // (新版 "<type>#<id8>"、旧版 "subagent-<agent>-<runId>-1"),但都有名,
     // 而 fork 子会话没有 session_info——「有名字」即扩展派生的通用判据。
     agent_name: Option<String>,
-    // 行是否为 family root。扫描时未知,归族构造 family 时标记;删除计划的
-    // 成员折叠靠它排除 members 里的 root 行。
-    is_root: bool,
     kind: PiMemberKind,
 }
 
@@ -124,10 +120,6 @@ impl FamilyRow for PiRow {
 
     fn member_tie_breaker(&self) -> Cow<'_, str> {
         Cow::Owned(self.path.display().to_string())
-    }
-
-    fn member_is_root(&self) -> bool {
-        self.is_root
     }
 }
 
@@ -228,7 +220,8 @@ impl PiReader {
             PiMemberKind::SessionFile => self.summaries.load(&row.path, parse_full_summary),
             PiMemberKind::TaskRun { transcript } => {
                 // run 转录不是 session 文件,持久层按 (路径, mtime) 键控同样适用。
-                self.summaries.load(transcript, |path| parse_run_summary(row, path))
+                self.summaries
+                    .load(transcript, |path| parse_run_summary(row, path))
             }
         }
     }
@@ -281,7 +274,10 @@ impl PiReader {
 
     // family 双半时间线：主会话 + 各子代理会话(子代理先注入 marker 入口),
     // 全部按 (timestamp, id) 终排,marker 与成员消息按时间交错。
-    fn family_timeline(&self, family: &PiFamily) -> Result<(Vec<SessionMessage>, Vec<SessionEvent>)> {
+    fn family_timeline(
+        &self,
+        family: &PiFamily,
+    ) -> Result<(Vec<SessionMessage>, Vec<SessionEvent>)> {
         let mut messages = Vec::new();
         let mut events = Vec::new();
         for row in &family.members {
@@ -294,9 +290,13 @@ impl PiReader {
             messages.extend(timeline.messages.iter().cloned());
             // 归族成员的血缘已由 family 表达;独立 root(fork、父缺失)保留
             // parent_session 事件,那是它唯一的血缘表达。
-            events.extend(timeline.events.iter().cloned().filter(|event| {
-                !(agent_member && event.kind == "parent_session")
-            }));
+            events.extend(
+                timeline
+                    .events
+                    .iter()
+                    .cloned()
+                    .filter(|event| !(agent_member && event.kind == "parent_session")),
+            );
         }
 
         messages.sort_by(|left, right| {
@@ -383,7 +383,6 @@ fn scan_row(path: &Path) -> Option<PiRow> {
         parent_path: header.parent_session.map(PathBuf::from),
         parent_session_id: None,
         agent_name,
-        is_root: false,
         kind: PiMemberKind::SessionFile,
     })
 }
@@ -451,7 +450,6 @@ fn scan_task_runs(agent_root: &Path, fingerprint_files: &mut Vec<PathBuf>) -> Ve
             parent_path: None,
             parent_session_id: Some(parent_id),
             agent_name: super::json_string(&value, &["agent"]),
-            is_root: false,
             kind: PiMemberKind::TaskRun { transcript },
         });
     }
@@ -515,13 +513,9 @@ fn build_family_index(rows: Vec<PiRow>) -> FamilyIndex<PiRow> {
         match top_owner(&row.id) {
             Some(root_id) => children_of.entry(root_id).or_default().push(row),
             None => {
-                let mut member = row.clone();
-                member.is_root = true;
-                let mut root = row;
-                root.is_root = true;
                 families.push(Family {
-                    members: vec![member],
-                    root,
+                    members: vec![row.clone()],
+                    root: row,
                 });
             }
         }
@@ -596,7 +590,10 @@ fn parse_run_summary(row: &PiRow, transcript: &Path) -> Result<SessionSummary> {
             super::merge_token_usage(&mut token_usage, pi_usage(usage));
         }
         if let Some(model) = super::json_string(message, &["model"]) {
-            models.record(super::json_string(message, &["provider"]).as_deref(), &model);
+            models.record(
+                super::json_string(message, &["provider"]).as_deref(),
+                &model,
+            );
         }
         if let Some(timestamp) = message.get("timestamp").and_then(Value::as_i64) {
             created_at = Some(created_at.map_or(timestamp, |current| current.min(timestamp)));
@@ -650,13 +647,6 @@ impl SessionReader for PiBackend {
         reader.family_summary(&reader.family_for_id(source_session_id)?)
     }
 
-    // 删除单位是 family:主会话与全部子代理会话文件一起清。
-    fn delete_plan_input(&self, source_session_id: &str) -> Result<super::delete::DeletePlanInput> {
-        Ok(DeletePlanInput::from_family(
-            &self.reader()?.family_for_id(source_session_id)?,
-        ))
-    }
-
     fn parse_overview(&self, source_session_id: &str) -> Result<SessionOverview> {
         let reader = self.reader()?;
         let family = reader.family_for_id(source_session_id)?;
@@ -702,7 +692,9 @@ impl SessionReader for PiBackend {
             .members
             .iter()
             .find(|row| is_agent_member(&family, row) && row.id == agent_session_id)
-            .ok_or_else(|| anyhow!("Pi subagent {agent_session_id} does not belong to this session"))?;
+            .ok_or_else(|| {
+                anyhow!("Pi subagent {agent_session_id} does not belong to this session")
+            })?;
         let mut messages = vec![reader.marker_message(row)];
         messages.extend(reader.member_timeline(row)?.messages.iter().cloned());
         Ok(messages)
@@ -760,50 +752,6 @@ fn expand_configured_path(value: &str) -> Result<PathBuf> {
     let home = crate::support::fs::user_home_dir().context("Unable to determine home directory")?;
     let cwd = std::env::current_dir().context("Unable to determine current directory")?;
     Ok(resolve_configured_path(value, &cwd, &home))
-}
-
-impl PiReader {
-    fn delete_session(&self, source_session_id: &str) -> Result<()> {
-        let family = self.family_for_id(source_session_id)?;
-        let canonical_sessions_root = crate::support::fs::canonicalize(&self.sessions_root)
-            .unwrap_or_else(|_| self.sessions_root.clone());
-        for member in &family.members {
-            let target = crate::support::fs::canonicalize(&member.path)
-                .with_context(|| format!("Failed to resolve Pi session {}", member.path.display()))?;
-            if !target.starts_with(&canonical_sessions_root)
-                || target.extension().and_then(|ext| ext.to_str()) != Some("jsonl")
-            {
-                bail!(
-                    "Refusing to delete a file outside the Pi sessions directory: {}",
-                    member.path.display()
-                );
-            }
-        }
-
-        for member in &family.members {
-            fs::remove_file(&member.path)
-                .with_context(|| format!("Failed to delete {}", member.path.display()))?;
-            // 显式配置的会话根不能被 prune 掉（保护在 prune_empty_parents 内）。
-            super::delete::prune_empty_parents(self.sessions_root.clone(), member.path.parent());
-        }
-        self.clear_cache()
-    }
-}
-
-// sources 注册表要的函数指针：经 static 前置取实例后删除。
-pub(crate) fn delete_session(source_session_id: &str) -> Result<()> {
-    BACKEND.reader()?.delete_session(source_session_id)
-}
-
-// 删除预演与执行一致:family 全部成员文件。
-pub(crate) fn delete_plan(input: &DeletePlanInput) -> Result<Vec<DeletePlanAction>> {
-    Ok(input
-        .members
-        .iter()
-        .map(|member| DeletePlanAction::RemoveFile {
-            path: member.path.display().to_string(),
-        })
-        .collect())
 }
 
 fn enumerate_pi_files(root: &Path) -> Result<Vec<PathBuf>> {
@@ -920,9 +868,10 @@ fn pi_entry_usages(entry: &Value) -> Vec<(Option<String>, SessionTokenUsage)> {
     };
 
     match message.get("role").and_then(Value::as_str) {
-        Some("assistant") => message.get("usage").map(|usage| {
-            vec![(super::json_string(message, &["model"]), pi_usage(usage))]
-        }).unwrap_or_default(),
+        Some("assistant") => message
+            .get("usage")
+            .map(|usage| vec![(super::json_string(message, &["model"]), pi_usage(usage))])
+            .unwrap_or_default(),
         Some("toolResult")
             if super::json_string(message, &["toolName"]).as_deref() == Some("subagent") =>
         {
@@ -1343,7 +1292,10 @@ fn parse_message_entry(entry: &PiEntry, session_id: &str) -> SessionMessage {
         blocks,
         // Pi 的 assistant 消息直接带这次调用的模型与 provider。
         model: super::json_string(message, &["model"]).map(|model| {
-            SessionModel::new(super::json_string(message, &["provider"]).as_deref(), &model)
+            SessionModel::new(
+                super::json_string(message, &["provider"]).as_deref(),
+                &model,
+            )
         }),
         session_id: Some(session_id.to_string()),
     }

@@ -12,10 +12,10 @@ use super::apps::{
 use super::catalog::{fetch_provider_models_inner, match_modelsdev};
 use super::config::ProviderConfigStore;
 use super::types::{
-    ApplyProviderInput, FetchedModelsResult, ModelsDevMatchResult, ProviderAppId, ProviderAppState,
-    ProviderAppSetting, ProviderApplyPreview, ProviderFilePreview, ProviderModelView,
-    ProviderMutationResult, ProviderProtocol, ProviderUpsertInput, ProviderView, ProvidersState,
-    ReasoningLevel, ResolvedProvider,
+    ApplyProviderInput, FetchedModelsResult, ModelsDevMatchResult, ProviderAppId,
+    ProviderAppSetting, ProviderAppState, ProviderApplyPreview, ProviderFilePreview,
+    ProviderModelView, ProviderMutationResult, ProviderProtocol, ProviderUpsertInput, ProviderView,
+    ProvidersState, ReasoningLevel, ResolvedProvider,
 };
 use crate::support::fs::display_path;
 

@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
@@ -17,10 +16,8 @@ use super::reader_engine::{
 };
 use super::tool_blocks::{self, ToolShape};
 use super::{
-    ContentBlock, DeletePlanAction, SessionEvent, SessionMessage, SessionModel, SessionSummary,
-    SessionTokenUsage, SourceApp,
-    delete::{DeletePlanInput, run_official_cli},
-    usage_stats::SqlUsageHours,
+    ContentBlock, SessionEvent, SessionMessage, SessionModel, SessionSummary, SessionTokenUsage,
+    SourceApp, usage_stats::SqlUsageHours,
 };
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -307,7 +304,7 @@ pub(crate) fn root() -> Result<PathBuf> {
         .join("opencode"))
 }
 
-// 模块级 env 版 db 路径仅供生产路径(delete/usage)使用;reader 引擎实例的
+// 模块级 env 版 db 路径仅供生产路径(usage)使用;reader 引擎实例的
 // 数据查询一律从实例 scan_root 派生,env 与实例互不串扰。
 pub(crate) fn db_path() -> Result<PathBuf> {
     Ok(root()?.join("opencode.db"))
@@ -330,59 +327,6 @@ fn opencode_db_timestamp_at(scan_root: &Path) -> Result<i64> {
     }
 
     crate::support::time::file_modified_timestamp_millis(&path)
-}
-
-pub(crate) fn delete_session(source_session_id: &str) -> Result<()> {
-    let family = BACKEND.engine()?.family_for_id(source_session_id)?;
-    let connection = open_connection()?;
-
-    for member in &family.members {
-        // v2 CLI 删除 root 会级联删掉整条 parent 链；已被级联删除的成员
-        // 直接跳过，避免 not found 让整个删除流程报错。
-        let exists: Option<i64> = connection
-            .query_row(
-                "SELECT 1 FROM session_v2 WHERE id = ?1",
-                [&member.id],
-                |row| row.get(0),
-            )
-            .map(Some)
-            .or_else(|error| match error {
-                rusqlite::Error::QueryReturnedNoRows => Ok(None),
-                other => Err(other),
-            })
-            .context("Failed to check OpenCode session existence")?;
-        if exists.is_none() {
-            continue;
-        }
-
-        run_official_cli(
-            &format!("opencode session delete {}", member.id),
-            Command::new("opencode")
-                .arg("session")
-                .arg("delete")
-                .arg(&member.id),
-        )?;
-    }
-
-    BACKEND.engine()?.clear()?;
-    Ok(())
-}
-
-fn open_connection() -> Result<Connection> {
-    Connection::open(db_path()?).context("Failed to open OpenCode sqlite database")
-}
-
-// 预演逐 id 列出官方命令;执行侧"已被官方级联删除则跳过"是命令层面的
-// 幂等细节,预演仍展示完整意图。
-pub(crate) fn delete_plan(input: &DeletePlanInput) -> Result<Vec<DeletePlanAction>> {
-    Ok(input
-        .session_ids()
-        .into_iter()
-        .map(|id| DeletePlanAction::RunCli {
-            program: "opencode".to_string(),
-            args: vec!["session".to_string(), "delete".to_string(), id],
-        })
-        .collect())
 }
 
 fn list_session_rows(

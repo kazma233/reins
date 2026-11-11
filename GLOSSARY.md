@@ -17,7 +17,7 @@ reins 读取会话数据的一个 CLI 工具（Codex、Claude Code、OpenCode、
 _Avoid_: 工具、app、backend
 
 **来源注册表（source registry）**：
-全部来源静态描述的单张表，一个来源一条；来源的探测、缓存清理、删除策略、用量采集都由它驱动，新增来源即新增一条。
+全部来源静态描述的单张表，一个来源一条；来源的探测、缓存清理、用量采集都由它驱动，新增来源即新增一条。
 _Avoid_: 分发表、来源清单（指迭代结果时另说）
 
 **读取器（reader）**：
@@ -43,10 +43,6 @@ _Avoid_: 兜底分组
 **会话身份（session identity）**：
 跨层寻址一个会话的唯一二元组（来源, source_session_id）；transcript_path 只是展示字段，不参与寻址、缓存键或前端主键。
 _Avoid_: 路径主键、transcript key
-
-**删除计划（delete plan）**：
-一次会话删除的预演：后端按来源给出的动作清单（删文件/删目录/官方命令/sql 清理）与说明文案；预览与确认框只渲染计划，删除语义的唯一真相在后端删除引擎。plan 的成员级推导只认结构化成员数据（`DeletePlanInput`，family 的非渲染折叠），`overview.agents` 是展示名册，不参与删除推导。
-_Avoid_: 命令预览（指渲染层格式化后的字符串）
 
 ### 工作区（workspace 域）
 

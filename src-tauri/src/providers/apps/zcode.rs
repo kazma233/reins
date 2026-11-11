@@ -55,14 +55,18 @@ fn array_section_mut<'a>(
         .or_insert_with(|| json!({}));
     for name in &section_names[1..] {
         let JsonValue::Object(map) = current else {
-            bail!("provider_config.json 的 {} 段必须是对象。", section_names[0]);
+            bail!(
+                "provider_config.json 的 {} 段必须是对象。",
+                section_names[0]
+            );
         };
-        current = map
-            .entry(name.to_string())
-            .or_insert_with(|| json!({}));
+        current = map.entry(name.to_string()).or_insert_with(|| json!({}));
     }
     let JsonValue::Object(map) = current else {
-        bail!("provider_config.json 的 {} 段必须是对象。", section_names[1]);
+        bail!(
+            "provider_config.json 的 {} 段必须是对象。",
+            section_names[1]
+        );
     };
     let list = map
         .entry(list_name.to_string())
@@ -264,7 +268,10 @@ fn model_rule(
 fn collect_model_rule_state(
     root: &JsonMap<String, JsonValue>,
     registration: &str,
-) -> (BTreeMap<String, JsonValue>, std::collections::BTreeSet<String>) {
+) -> (
+    BTreeMap<String, JsonValue>,
+    std::collections::BTreeSet<String>,
+) {
     let mut existing_by_model: BTreeMap<String, JsonValue> = BTreeMap::new();
     let mut manual_models = std::collections::BTreeSet::new();
     let section = root
@@ -464,8 +471,7 @@ impl AppAdapter for ZcodeAdapter {
                     .get(model_id)
                     .cloned()
                     .unwrap_or_else(|| json!({}));
-                if let Some(rule) =
-                    model_rule(&registration, model, base, self.reasoning_dialect())
+                if let Some(rule) = model_rule(&registration, model, base, self.reasoning_dialect())
                 {
                     model_rules.push(rule);
                 }
@@ -518,21 +524,17 @@ impl AppAdapter for ZcodeAdapter {
             return Err(modified_entry_error(&registration));
         }
 
-        provider_rules_mut(&mut root)?.retain(|rule| {
-            rule_provider_id(rule) != Some(registration.as_str())
-        });
-        provider_order_mut(&mut root)?.retain(|value| {
-            value.as_str() != Some(registration.as_str())
-        });
-        model_rules_mut(&mut root)?.retain(|rule| {
-            rule_provider_id(rule) != Some(registration.as_str())
-        });
+        provider_rules_mut(&mut root)?
+            .retain(|rule| rule_provider_id(rule) != Some(registration.as_str()));
+        provider_order_mut(&mut root)?
+            .retain(|value| value.as_str() != Some(registration.as_str()));
+        model_rules_mut(&mut root)?
+            .retain(|rule| rule_provider_id(rule) != Some(registration.as_str()));
         // 手动规则同样按 providerId 清掉：对齐 ZCode 自己的
         // deletePersonalProvider（deleteExactForProvider 覆盖智能与手动两类），
         // 平台已移除时残留的模型规则没有意义。
-        manual_model_rules_mut(&mut root)?.retain(|rule| {
-            rule_provider_id(rule) != Some(registration.as_str())
-        });
+        manual_model_rules_mut(&mut root)?
+            .retain(|rule| rule_provider_id(rule) != Some(registration.as_str()));
 
         Ok(vec![(path, serialize_json(&root)?)])
     }

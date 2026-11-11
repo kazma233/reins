@@ -9,10 +9,8 @@ use super::catalog::{
     SourceSelection, clear_session_caches_inner, detect_sources_inner, list_sessions_inner,
     refresh_sessions_inner,
 };
-use super::delete::{delete_session_inner, get_delete_plan_inner};
 use super::model::{
-    DeletePlan, DeleteSessionResult, SessionMessage, SessionOverview, SessionPage,
-    SessionRefreshResult, SourceApp, SourceStatus,
+    SessionMessage, SessionOverview, SessionPage, SessionRefreshResult, SourceApp, SourceStatus,
 };
 use super::timeline::{
     get_session_agent_messages_inner, get_session_events_inner, get_session_messages_inner,
@@ -148,29 +146,6 @@ pub(crate) async fn get_session_events(
 #[tauri::command]
 pub(crate) async fn get_usage_stats() -> std::result::Result<UsageStats, String> {
     run_blocking(usage_stats_inner).await
-}
-
-#[tauri::command]
-pub(crate) async fn get_delete_plan(
-    source_app: String,
-    source_session_id: String,
-) -> std::result::Result<DeletePlan, String> {
-    let source = SourceApp::from_str(&source_app).map_err(|error| error.to_string())?;
-
-    run_blocking(move || get_delete_plan_inner(source, &source_session_id)).await
-}
-
-#[tauri::command]
-pub(crate) async fn delete_session(
-    source_app: String,
-    source_session_id: String,
-    state: tauri::State<'_, SessionIndexState>,
-) -> std::result::Result<DeleteSessionResult, String> {
-    let source = SourceApp::from_str(&source_app).map_err(|error| error.to_string())?;
-    let session_index_state = state.inner().clone();
-
-    run_blocking(move || delete_session_inner(&session_index_state, source, &source_session_id))
-        .await
 }
 
 async fn run_blocking<T, F>(operation: F) -> std::result::Result<T, String>

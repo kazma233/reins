@@ -1,30 +1,5 @@
-use anyhow::Result;
-
 use crate::session;
 use crate::session::model::SourceApp;
-
-// zcode/dsh 的「不支持删除」原因是来源注册表数据,文案直达前端错误提示,
-// 这里钉住防止悄悄漂移;两个分支不触环境与文件,无需 TestEnvGuard。
-#[test]
-fn unsupported_deletion_reports_app_reason() -> Result<()> {
-    let zcode_error =
-        session::delete_session(SourceApp::Zcode, "unused").expect_err("zcode 删除应整体不支持");
-    assert!(
-        zcode_error
-            .to_string()
-            .contains("ZCode session deletion is unsupported")
-    );
-
-    let dsh_error =
-        session::delete_session(SourceApp::Dsh, "unused").expect_err("dsh 删除应整体不支持");
-    assert!(
-        dsh_error
-            .to_string()
-            .contains("DSH session deletion is unsupported")
-    );
-
-    Ok(())
-}
 
 // 来源注册表是全部来源分发的唯一事实:必须恰好覆盖每个 SourceApp 变体
 // 一次;顺序是可观察行为(detect 输出与 usage sources 都按该顺序产出),

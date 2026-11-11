@@ -907,8 +907,8 @@ fn dsh_usage_hours_bucketed_by_assistant_event_time() -> Result<()> {
     )?;
 
     let buckets = session::dsh::usage_hours(&path)?;
-    let expected_bucket = |input: u64, output: u64, cache_read: u64, model: &str| {
-        session::model::UsageHourBucket {
+    let expected_bucket =
+        |input: u64, output: u64, cache_read: u64, model: &str| session::model::UsageHourBucket {
             usage: session::model::SessionTokenUsage {
                 input_tokens: input,
                 output_tokens: output,
@@ -926,8 +926,7 @@ fn dsh_usage_hours_bucketed_by_assistant_event_time() -> Result<()> {
             )]
             .into_iter()
             .collect(),
-        }
-    };
+        };
     assert_eq!(
         buckets,
         BTreeMap::from([
@@ -942,9 +941,4 @@ fn dsh_usage_hours_bucketed_by_assistant_event_time() -> Result<()> {
         ])
     );
     Ok(())
-}
-
-#[test]
-fn dsh_delete_session_is_unsupported() {
-    assert!(session::delete_session(SourceApp::Dsh, "ignored").is_err());
 }

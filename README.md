@@ -28,7 +28,6 @@
 - Grok Build 会话自动折叠已确认的 subagent 子会话，用量统计含子代理汇总
 - 可单独查看 Pi subagent 每次运行的任务、消耗、失败原因与完整过程
 - 消息页完整展示消息流，工具调用合并为可展开查看的摘要
-- 会话可删除（ZCode 暂不支持），删除前有二次确认与等价命令预览
 
 ### 配置与分发
 
@@ -83,7 +82,7 @@ pnpm tauri build            # 打包当前平台的安装包
 cargo test --manifest-path src-tauri/Cargo.toml   # Rust 测试
 ```
 
-Rust 测试请全量运行：部分测试夹具依赖 bin 产物，`cargo test --lib` 会因定位不到夹具而误报失败。
+Rust 测试请全量运行，不要用 `cargo test --lib` 截短。
 
 ## 图标
 

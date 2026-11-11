@@ -220,9 +220,7 @@ pub(crate) fn full_scope_usage(columns: UsageColumns) -> SessionTokenUsage {
 // 装配为 (session_id, 毫秒时间戳, 模型名, 归一后用量);模型列取不到时为
 // None,只进总量。
 pub(crate) fn hours_from_usage_rows(
-    rows: impl Iterator<
-        Item = rusqlite::Result<(String, i64, Option<String>, SessionTokenUsage)>,
-    >,
+    rows: impl Iterator<Item = rusqlite::Result<(String, i64, Option<String>, SessionTokenUsage)>>,
 ) -> Result<SqlUsageHours> {
     let today = today_prefix();
     let mut buckets = UsageHourBuckets::new();
@@ -255,13 +253,11 @@ pub(crate) fn days_from_sql(
 ) -> Result<Option<UsageSourceStats>> {
     // db 是 SQL 来源唯一的数据源,mtime 作缓存键;db 缺失时没有键,交给
     // collect 判定来源不可用,不写缓存。
-    let cache_key = db()
-        .ok()
-        .and_then(|db| {
-            crate::support::time::file_modified_timestamp_millis(&db)
-                .ok()
-                .map(|mtime| (db, mtime))
-        });
+    let cache_key = db().ok().and_then(|db| {
+        crate::support::time::file_modified_timestamp_millis(&db)
+            .ok()
+            .map(|mtime| (db, mtime))
+    });
 
     if let Some((db, mtime)) = &cache_key {
         let cached = super::usage_day_cache::load::<CachedSqlUsage>(source_app, db, *mtime)
@@ -366,10 +362,7 @@ fn model_day_points(buckets: &UsageHourBuckets) -> Vec<UsageModelDayPoint> {
         .collect()
 }
 
-fn model_today_hour_points(
-    buckets: &UsageHourBuckets,
-    today: &str,
-) -> Vec<UsageModelHourPoint> {
+fn model_today_hour_points(buckets: &UsageHourBuckets, today: &str) -> Vec<UsageModelHourPoint> {
     let mut hours: BTreeMap<(String, u8), SessionTokenUsage> = BTreeMap::new();
     for (hour_key, bucket) in buckets {
         let Some(hour) = today_hour(hour_key, today) else {
@@ -385,11 +378,7 @@ fn model_today_hour_points(
 
     hours
         .into_iter()
-        .map(|((model, hour), usage)| UsageModelHourPoint {
-            model,
-            hour,
-            usage,
-        })
+        .map(|((model, hour), usage)| UsageModelHourPoint { model, hour, usage })
         .collect()
 }
 

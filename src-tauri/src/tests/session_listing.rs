@@ -346,4 +346,3 @@ fn refresh_with_all_selection_returns_merged_page() -> Result<()> {
     fs::remove_dir_all(&temp_home).ok();
     Ok(())
 }
-

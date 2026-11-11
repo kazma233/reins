@@ -437,5 +437,3 @@ fn opencode_flags_archived_sessions_from_time_archived() -> Result<()> {
 
     Ok(())
 }
-
-

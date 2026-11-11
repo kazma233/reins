@@ -542,7 +542,9 @@ fn fetch_modelsdev_returns_parsed_value_for_valid_json() -> Result<()> {
         stream.write_all(response.as_bytes()).expect("write");
     });
 
-    let client = reqwest::blocking::Client::builder().build().expect("client");
+    let client = reqwest::blocking::Client::builder()
+        .build()
+        .expect("client");
     let parsed = crate::providers::catalog::fetch_modelsdev(
         &client,
         &format!("http://127.0.0.1:{port}/api.json"),

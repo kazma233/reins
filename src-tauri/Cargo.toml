@@ -5,7 +5,6 @@ description = "Read and inspect local coding-agent sessions."
 authors = ["kazma"]
 license = "MIT"
 edition = "2024"
-default-run = "reins"
 
 [lib]
 name = "reins_core"

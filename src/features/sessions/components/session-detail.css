@@ -127,62 +127,9 @@
   flex: 1 1 100%;
 }
 
-.path-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: 12px;
-}
-
-.path-list.compact {
-  max-height: 220px;
-  overflow: auto;
-}
-
-.path-list code {
-  display: block;
-  padding: 10px 12px;
-  border-radius: var(--radius-sm);
-  background: var(--color-surface-soft);
-  word-break: break-all;
-}
-
-.pill {
-  display: inline-flex;
-  align-items: center;
-  padding: 4px 8px;
-  border-radius: 999px;
-  background: var(--color-surface-strong);
-  color: var(--color-ink);
-  font-size: var(--font-size-sm);
-}
-
-
-
-
 .tool-tag {
   color: var(--color-primary);
   background: var(--color-primary-tint);
-}
-
-.error-box {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: 12px;
-  padding: 12px 14px;
-  border: 1px solid var(--color-danger-line);
-  border-radius: var(--radius-md);
-  background: var(--color-danger-tint);
-}
-
-.error-box strong {
-  color: var(--color-danger);
-}
-
-.danger-pill {
-  background: var(--color-danger-tint);
-  color: var(--color-danger);
 }
 
 .timeline-controls {
@@ -599,96 +546,6 @@
 .subagent-badge.strong {
   background: var(--color-primary-tint-strong);
   color: var(--color-primary);
-}
-
-
-.delete-dialog-summary {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 16px 18px;
-  border: 1px solid var(--color-danger-line);
-  border-radius: var(--radius-md);
-  background: var(--color-danger-tint);
-}
-
-.delete-dialog-summary code {
-  display: inline-flex;
-  width: fit-content;
-  max-width: 100%;
-  padding: 6px 10px;
-  border-radius: var(--radius-sm);
-  background: var(--color-canvas);
-  color: var(--color-danger);
-  word-break: break-all;
-}
-
-.delete-dialog-copy {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  color: var(--color-body);
-  padding: 0 2px;
-}
-
-.delete-dialog-method-box {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 14px 16px;
-  border: 1px solid var(--color-hairline-soft);
-  border-radius: var(--radius-md);
-  background: var(--color-surface-soft);
-}
-
-.delete-dialog-method-title {
-  color: var(--color-ink);
-  font-size: var(--font-size-md);
-  font-weight: 600;
-}
-
-.delete-dialog-method-list {
-  margin: 0;
-  padding-left: 18px;
-  color: var(--color-body);
-  line-height: 1.6;
-}
-
-.delete-dialog-command-block {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.delete-dialog-command-title {
-  color: var(--color-ink);
-  font-size: var(--font-size-md);
-  font-weight: 600;
-}
-
-.delete-dialog .path-list.compact {
-  margin-top: 0;
-  padding-right: 2px;
-}
-
-.delete-dialog-meta {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-  padding: 0 2px;
-}
-
-.detail-header .danger-button {
-  flex: 0 0 auto;
-  min-width: fit-content;
-}
-
-@media (max-width: 1024px) {
-  .delete-dialog {
-    max-height: min(92vh, 860px);
-  }
 }
 
 /* --- 文档流时间线 --- */

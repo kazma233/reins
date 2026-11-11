@@ -584,9 +584,7 @@ fn grokbuild_rejects_unknown_ids_and_symlinked_aux_files() -> Result<()> {
             .parse_messages("unknown")
             .is_err()
     );
-    assert!(
-        session::timeline::get_session_messages_inner(SourceApp::GrokBuild, "other").is_err()
-    );
+    assert!(session::timeline::get_session_messages_inner(SourceApp::GrokBuild, "other").is_err());
     #[cfg(unix)]
     {
         std::os::unix::fs::symlink(&outside, path.with_file_name("chat_history.jsonl"))?;
@@ -667,32 +665,9 @@ fn grokbuild_large_events_page_and_auxiliary_changes_are_fresh() -> Result<()> {
         &[json!({"type":"assistant", "content":"Second"})],
     )?;
     assert_eq!(
-        reader.parse_messages("large")?[0].blocks[0]
-            .text
-            .as_deref(),
+        reader.parse_messages("large")?[0].blocks[0].text.as_deref(),
         Some("Second")
     );
-    Ok(())
-}
-
-#[test]
-fn grokbuild_delete_boundary() -> Result<()> {
-    let home = env::temp_dir().join(format!("reins-test-{}", Uuid::new_v4()));
-    fs::create_dir_all(&home)?;
-    let _guard = TestEnvGuard::set_home(home.as_path());
-    // sessions root 之外的伪造入口必须被拒，且文件原样保留。
-    let path = home.join("outside/export/summary.json");
-    fs::create_dir_all(path.parent().unwrap())?;
-    fs::write(&path, "{}")?;
-    assert!(
-        session::delete::delete_session_inner(
-            &state::session_index::SessionIndexState::default(),
-            SourceApp::GrokBuild,
-            "export",
-        )
-        .is_err()
-    );
-    assert!(path.exists());
     Ok(())
 }
 
@@ -719,37 +694,5 @@ fn grokbuild_index_rebuilds_when_new_session_appears() -> Result<()> {
         .map(|entry| entry.source_session_id)
         .collect::<Vec<_>>();
     assert!(ids.contains(&"second".to_string()), "{ids:?}");
-    Ok(())
-}
-
-// 删除后下一次列表不得再见已删会话:指纹失配与 delete_session 末尾的
-// 显式清缓存都能达成(实测摘掉显式清该用例仍过——删除本身改变文件
-// 集合),这条钉住的是行为契约,不是特定机制。
-#[test]
-fn grokbuild_delete_invalidates_index_cache() -> Result<()> {
-    let home = bounded_home();
-    fs::create_dir_all(&home)?;
-    let _guard = TestEnvGuard::set_home(&home);
-    let kept = fixture(&home, "kept")?;
-    history(&kept)?;
-    let gone = fixture(&home, "gone")?;
-    history(&gone)?;
-
-    let fake_cli = super::session_delete::FakeCli::install(&home, "grok")?;
-    let _ = fake_cli;
-
-    let reader = session::reader(SourceApp::GrokBuild);
-    assert_eq!(reader.list_entries()?.len(), 2);
-
-    // 直调删除实现(不经 delete_session_inner),证明失效清在删除动作里,
-    // 不依赖调用方再走 clear_all_caches。
-    session::grokbuild::delete_session("gone")?;
-
-    let ids = reader
-        .list_entries()?
-        .into_iter()
-        .map(|entry| entry.source_session_id)
-        .collect::<Vec<_>>();
-    assert_eq!(ids, vec!["kept".to_string()], "{ids:?}");
     Ok(())
 }

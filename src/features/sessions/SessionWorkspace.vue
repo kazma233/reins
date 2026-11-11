@@ -4,7 +4,6 @@ import { refDebounced } from "@vueuse/core";
 import "./styles/workspace.css";
 import {
   detectSources,
-  getDeletePlan,
   getSessionOverview,
   listSessions,
   refreshSessions
@@ -31,7 +30,6 @@ const emit = defineEmits<{ openUsage: [] }>();
 
 const sessionStore = useSessionWorkspaceState();
 const {
-  deletePlan,
   loadingDetail,
   loadingSessions,
   loadingSources,
@@ -114,7 +112,6 @@ function clearSelectedSession(options?: { invalidateDetailRequest?: boolean }) {
   }
   sessionStore.setSelectedSessionKey(null);
   sessionStore.setSessionOverview(null);
-  sessionStore.setDeletePlan(null);
   sessionStore.setLoadingDetail(false);
 }
 
@@ -230,7 +227,6 @@ watch(
     async function loadDetail() {
       if (!selectedSessionKey.value) {
         sessionStore.setSessionOverview(null);
-        sessionStore.setDeletePlan(null);
         sessionStore.setLoadingDetail(false);
         return;
       }
@@ -243,7 +239,6 @@ watch(
           summary.sourceApp !== selectedSource.value)
       ) {
         sessionStore.setSessionOverview(null);
-        sessionStore.setDeletePlan(null);
         sessionStore.setLoadingDetail(false);
         return;
       }
@@ -256,26 +251,18 @@ watch(
         eventCount: null,
         agents: []
       });
-      sessionStore.setDeletePlan(null);
 
       try {
-        // 删除计划与 overview 并行获取；计划失败只隐藏删除入口，不阻断详情。
-        const planPromise = getDeletePlan(
-          summary.sourceApp,
-          summary.sourceSessionId
-        ).catch(() => null);
         const nextDetail = await getSessionOverview(
           summary.sourceApp,
           summary.sourceSessionId
         );
-        const nextPlan = await planPromise;
 
         if (cancelled || !detailRequestGuard.isLatest(requestId)) {
           return;
         }
 
         sessionStore.setSessionOverview(nextDetail);
-        sessionStore.setDeletePlan(nextPlan);
       } catch (error) {
         if (cancelled || !detailRequestGuard.isLatest(requestId)) {
           return;
@@ -401,17 +388,6 @@ function backToList() {
 // 会话统计是另一个顶层视图(用量统计),这里只做跳转,不复制它的状态。
 function openUsageStats() {
   emit("openUsage");
-}
-
-function handleSessionDeleted(sessionKey: string | null) {
-  clearSelectedSession({ invalidateDetailRequest: true });
-  // 删除是磁盘上的既成事实:列表内存里直接摘掉这一条,滚动位置与筛选态
-  // 原地保留,不再整页刷新。key 对不上的极端情况由下一次来源刷新兜底。
-  if (sessionKey) {
-    sessionStore.removeSession(sessionKey);
-    sessionTotalCount.value = Math.max(0, sessionTotalCount.value - 1);
-  }
-  view.value = "list";
 }
 </script>
 
@@ -558,10 +534,8 @@ function handleSessionDeleted(sessionKey: string | null) {
           />
           <SessionDetail
             v-else
-            :delete-plan="deletePlan"
             :loading="loadingDetail"
             :overview="sessionOverview"
-            @deleted="handleSessionDeleted"
           />
         </div>
       </div>

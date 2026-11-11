@@ -3,19 +3,15 @@ use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result, anyhow, bail};
-use rusqlite::{Connection, params};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
 use super::{
-    ContentBlock, DeletePlanAction, ModelTally, SessionEvent, SessionFileEntry,
-    SessionMessage, SessionModel, SessionOverview, SessionReader,
-    SessionSummary, SessionTokenUsage, SourceApp, UsageHourBuckets,
-    delete::{DeletePlanInput, run_official_cli},
+    ContentBlock, ModelTally, SessionEvent, SessionFileEntry, SessionMessage, SessionModel,
+    SessionOverview, SessionReader, SessionSummary, SessionTokenUsage, SourceApp, UsageHourBuckets,
 };
 
 use super::family_index::{Family, FamilyIndex, FamilyRow};
@@ -491,8 +487,7 @@ fn parse_subagent_metas(paths: &[PathBuf]) -> Result<Vec<SubagentMeta>> {
     Ok(metas)
 }
 
-// 自由函数转发到按根缓存的实例:八处调用点(family_for_id、parse_*、
-// delete、delete_plan_input)零改动。
+// 自由函数转发到按根缓存的实例(family_for_id、parse_*):调用点零改动。
 fn family_index() -> Result<FamilyIndex<Row>> {
     BACKEND.index()?.family_index()
 }
@@ -1041,11 +1036,6 @@ impl SessionReader for GrokBuildBackend {
         Ok(family_summary(&family))
     }
 
-    fn delete_plan_input(&self, source_session_id: &str) -> Result<super::delete::DeletePlanInput> {
-        Ok(super::delete::DeletePlanInput::from_family(&family_for_id(
-            source_session_id,
-        )?))
-    }
     fn parse_overview(&self, source_session_id: &str) -> Result<SessionOverview> {
         let family = family_for_id(source_session_id)?;
         Ok(SessionOverview {
@@ -1087,137 +1077,4 @@ impl SessionReader for GrokBuildBackend {
         result.extend(messages(row.member_path().as_ref())?);
         Ok(result)
     }
-}
-
-// root 会话交给官方 `grok sessions delete`（目录、搜索索引、活跃保护都由
-// grok 自己处理）；该命令只认顶层会话、够不到 subagent 子会话，子会话按
-// 本地清理：成员目录 + session_search.sqlite 索引行。
-pub(crate) fn delete_session(source_session_id: &str) -> Result<()> {
-    let family = family_for_id(source_session_id)?;
-
-    run_official_delete(family.root.member_id())?;
-
-    for row in family.members.iter().skip(1) {
-        let member_path = row.member_path();
-        let dir = member_path
-            .as_ref()
-            .parent()
-            .context("Invalid Grok Build session directory")?;
-        // 子会话目录可能已缺失（family 保留了占位入口），跳过即可。
-        if dir.exists() {
-            fs::remove_dir_all(dir)
-                .with_context(|| format!("Failed to delete {}", dir.display()))?;
-        }
-    }
-    // root 的会话目录与索引行由官方命令清理，这里只清本地删除的子会话行。
-    delete_search_index_rows(&family)?;
-
-    // cwd 分组目录删空后顺手清掉；prompt_history.jsonl 等共享文件会让它保留。
-    // 成员路径来自 canonicalize 后的索引扫描，root 先规范化才能对上前缀。
-    let sessions_root = crate::support::fs::canonicalize(&root()?)?;
-    for row in &family.members {
-        if let Some(dir) = row.member_path().as_ref().parent().and_then(Path::parent) {
-            super::delete::prune_empty_parents(sessions_root.clone(), Some(dir));
-        }
-    }
-    // 「删除 → 索引失效」写在动作发生地,不依赖指纹口径恰好覆盖删除的
-    // 全部文件副作用(实测指纹失配也会兜住,这里显式清是契约不是必需)。
-    BACKEND.clear_cache()
-}
-
-// delete_session 的预演:root 交官方命令,官方够不到的子会话目录与搜索
-// 索引行走本地清理;root 自身的目录与索引行由官方命令负责,不进动作清单。
-pub(crate) fn delete_plan(input: &DeletePlanInput) -> Result<Vec<DeletePlanAction>> {
-    let mut actions = vec![DeletePlanAction::RunCli {
-        program: "grok".to_string(),
-        args: vec![
-            "sessions".to_string(),
-            "delete".to_string(),
-            input.root_id.clone(),
-        ],
-    }];
-
-    // 成员会话目录 = 成员转录的父目录,去重保首见序;root 自己的目录由官方
-    // 命令清理,不进动作清单。
-    let mut session_dirs = Vec::<String>::new();
-    for member in &input.members {
-        if member.is_root {
-            continue;
-        }
-        if let Some(dir) = member.path.parent() {
-            let dir = dir.display().to_string();
-            if !session_dirs.iter().any(|seen| seen == &dir) {
-                session_dirs.push(dir);
-            }
-        }
-    }
-    for dir in session_dirs {
-        actions.push(DeletePlanAction::RemoveDirectory { path: dir });
-    }
-
-    // 搜索索引只清本地删除的子会话行;SQL 单引号转义规则与 sqlite 一致。
-    let child_ids = input
-        .session_ids()
-        .into_iter()
-        .filter(|id| id != &input.root_id)
-        .collect::<Vec<_>>();
-    if !child_ids.is_empty() {
-        let ids = child_ids
-            .iter()
-            .map(|id| format!("'{}'", id.replace('\'', "''")))
-            .collect::<Vec<_>>()
-            .join(", ");
-        actions.push(DeletePlanAction::Sqlite {
-            db_path: "~/.grok/sessions/session_search.sqlite".to_string(),
-            sql: format!("DELETE FROM session_docs WHERE session_id IN ({ids});"),
-        });
-    }
-
-    Ok(actions)
-}
-
-// grok 对不存在的会话输出 "No session found" 但 exit 0（幂等语义），只有
-// 真正失败才 exit 非零；失败时的命令输出由 run_official_cli 原样带回。
-fn run_official_delete(session_id: &str) -> Result<()> {
-    run_official_cli(
-        &format!("grok sessions delete {session_id}"),
-        grok_binary()?.arg("sessions").arg("delete").arg(session_id),
-    )
-}
-
-// 会话数据由 grok home 内的 CLI 写入，删除优先用同源二进制；home 内没有
-// （如数据目录搬迁后）退回 PATH 上的 grok。
-fn grok_binary() -> Result<Command> {
-    let home = super::spec_root(SourceApp::GrokBuild)?;
-    let home_binary = home.join("bin").join("grok");
-    if home_binary.is_file() {
-        return Ok(Command::new(home_binary));
-    }
-    Ok(Command::new("grok"))
-}
-
-// session_docs 按 session_id 主键存全文索引，删除触发的 FTS 维护由 grok
-// 建库时的触发器完成；该库是搜索索引而非会话本体，旧版本会话可能没有。
-// 只清子会话行：root 的索引行随官方删除命令一并处理。
-fn delete_search_index_rows(family: &Family<Row>) -> Result<()> {
-    let db_path = root()?.join("session_search.sqlite");
-    if !db_path.exists() {
-        return Ok(());
-    }
-    let connection = Connection::open(&db_path)
-        .with_context(|| format!("Failed to open {}", db_path.display()))?;
-    for row in family.members.iter().skip(1) {
-        connection
-            .execute(
-                "DELETE FROM session_docs WHERE session_id = ?1",
-                params![row.member_id()],
-            )
-            .with_context(|| {
-                format!(
-                    "Failed to delete Grok Build search index for {}",
-                    row.member_id()
-                )
-            })?;
-    }
-    Ok(())
 }

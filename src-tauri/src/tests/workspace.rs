@@ -684,10 +684,13 @@ skill_sources:
     let config = parse_manager_config(raw, &config_path, &env)?;
 
     let description_of = |id: &str| {
-        config.skill_sources.get(id).and_then(|source| match source {
-            ResolvedSkillSourceDefinition::Local { description, .. } => description.clone(),
-            _ => None,
-        })
+        config
+            .skill_sources
+            .get(id)
+            .and_then(|source| match source {
+                ResolvedSkillSourceDefinition::Local { description, .. } => description.clone(),
+                _ => None,
+            })
     };
     assert_eq!(description_of("notes").as_deref(), Some("个人笔记技能库"));
     // 纯空白与缺字段都按未填处理。

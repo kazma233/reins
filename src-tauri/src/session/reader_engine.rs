@@ -449,7 +449,10 @@ impl<R: FamilySpec> ReaderEngine<R> {
         // 索引同一份 freshness,信任窗口只是延伸到进程之外。
         let root_key = crate::support::fs::path_key(&self.scan_root);
         let stamp = freshness.cache_stamp();
-        if let Some(rows) = self.rows_cache.load::<R::Row>(self.spec.app(), &root_key, &stamp) {
+        if let Some(rows) = self
+            .rows_cache
+            .load::<R::Row>(self.spec.app(), &root_key, &stamp)
+        {
             return self.rebuild_index(freshness, rows);
         }
 
@@ -677,12 +680,6 @@ impl<R: FamilySpec> SessionReader for ReaderEngine<R> {
         })
     }
 
-    fn delete_plan_input(&self, source_session_id: &str) -> Result<super::delete::DeletePlanInput> {
-        Ok(super::delete::DeletePlanInput::from_family(
-            &self.family_for_id(source_session_id)?,
-        ))
-    }
-
     fn parse_messages(&self, source_session_id: &str) -> Result<Vec<SessionMessage>> {
         let timeline = self.family_timeline(&self.family_for_id(source_session_id)?)?;
         Ok((*timeline.messages).clone())
@@ -770,12 +767,6 @@ impl<R: FamilySpec> SessionReader for FamilyReader<R> {
 
     fn parse_overview(&self, source_session_id: &str) -> Result<SessionOverview> {
         self.engine()?.parse_overview(source_session_id)
-    }
-
-    fn delete_plan_input(&self, source_session_id: &str) -> Result<super::delete::DeletePlanInput> {
-        Ok(super::delete::DeletePlanInput::from_family(
-            &self.engine()?.family_for_id(source_session_id)?,
-        ))
     }
 
     fn parse_messages(&self, source_session_id: &str) -> Result<Vec<SessionMessage>> {

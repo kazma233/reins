@@ -1,12 +1,9 @@
 use std::collections::{HashMap, HashSet};
-use std::fs;
 use std::io::BufRead;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::Arc;
 
-use anyhow::{Context, Result};
-use rusqlite::Connection;
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use walkdir::WalkDir;
@@ -21,9 +18,8 @@ use super::reader_engine::{
 };
 use super::transcript;
 use super::{
-    ContentBlock, DeletePlanAction, ModelTally, SessionEvent, SessionMessage, SessionModel,
-    SessionSummary, SessionTokenUsage, SourceApp, SummaryAccumulator, TimelineRecord,
-    UsageHourBuckets, delete::{DeletePlanInput, run_official_cli},
+    ContentBlock, ModelTally, SessionEvent, SessionMessage, SessionModel, SessionSummary,
+    SessionTokenUsage, SourceApp, SummaryAccumulator, TimelineRecord, UsageHourBuckets,
 };
 
 // 归档会话的存放目录,与活跃会话的 sessions/ 并列在 CODEX_HOME 下;上游
@@ -361,64 +357,6 @@ pub(crate) fn engine_at(root: PathBuf, store_dir: PathBuf) -> ReaderEngine<Codex
 
 pub(crate) fn root() -> Result<PathBuf> {
     super::spec_root(SourceApp::Codex)
-}
-
-pub(crate) fn delete_session(source_session_id: &str) -> Result<()> {
-    let family = BACKEND.engine()?.family_for_id(source_session_id)?;
-
-    for member in &family.members {
-        // 官方删除 root 会级联整条 family；已被级联删除的成员（state 库
-        // threads 行已不存在）直接跳过，避免 not found 让整个删除流程报错。
-        if !thread_exists(&member.summary.source_session_id)? {
-            continue;
-        }
-
-        run_official_cli(
-            &format!("codex delete {}", member.summary.source_session_id),
-            Command::new("codex")
-                .arg("delete")
-                .arg("--force")
-                .arg(&member.summary.source_session_id),
-        )?;
-    }
-
-    BACKEND.engine()?.clear()?;
-    Ok(())
-}
-
-// 预演逐 id 列出官方命令;执行侧"已不在 state 库则跳过"是命令层面的幂等
-// 细节,预演仍展示完整意图。
-pub(crate) fn delete_plan(input: &DeletePlanInput) -> Result<Vec<DeletePlanAction>> {
-    Ok(input
-        .session_ids()
-        .into_iter()
-        .map(|id| DeletePlanAction::RunCli {
-            program: "codex".to_string(),
-            args: vec!["delete".to_string(), "--force".to_string(), id],
-        })
-        .collect())
-}
-
-// codex delete --force 非交互执行且只认 UUID；会话存在性以 state 库 threads 行为准。
-fn thread_exists(session_id: &str) -> Result<bool> {
-    for state_db in state_dbs()? {
-        let connection = Connection::open(&state_db)
-            .with_context(|| format!("Failed to open {}", state_db.display()))?;
-        let exists: Option<i64> = connection
-            .query_row("SELECT 1 FROM threads WHERE id = ?1", [session_id], |row| {
-                row.get(0)
-            })
-            .map(Some)
-            .or_else(|error| match error {
-                rusqlite::Error::QueryReturnedNoRows => Ok(None),
-                other => Err(other),
-            })
-            .with_context(|| format!("Failed to check Codex thread {session_id}"))?;
-        if exists.is_some() {
-            return Ok(true);
-        }
-    }
-    Ok(false)
 }
 
 fn parse_session_index_row(path: &Path) -> Result<CodexSessionRow> {
@@ -993,19 +931,4 @@ fn extract_title(content: Option<&Value>) -> Option<String> {
         .filter(|block| block.kind != "unsupported_content" && block.kind != "unsupported_block")
         .filter_map(|block| block.text)
         .find_map(|text| super::title_candidate_from_text(&text))
-}
-
-fn state_dbs() -> Result<Vec<PathBuf>> {
-    let mut candidates = fs::read_dir(root()?)?
-        .filter_map(|entry| entry.ok())
-        .map(|entry| entry.path())
-        .filter(|path| {
-            path.file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| name.starts_with("state_") && name.ends_with(".sqlite"))
-        })
-        .collect::<Vec<_>>();
-
-    candidates.sort();
-    Ok(candidates)
 }

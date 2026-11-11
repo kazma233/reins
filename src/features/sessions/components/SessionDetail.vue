@@ -3,7 +3,6 @@ import { computed, inject, ref, toRef, watch, type Ref } from "vue";
 import { refDebounced } from "@vueuse/core";
 import { getSessionAgentMessages } from "../api";
 import { useKeepAliveScroll } from "../composables/useKeepAliveScroll";
-import { useSessionDetailActions } from "../composables/useSessionDetailActions";
 import { useSessionTimeline } from "../composables/useSessionTimeline";
 import {
   agentDisplayLabel,
@@ -26,28 +25,18 @@ import { formatTimestamp, formatTokenCount } from "@shared/lib/format";
 import { formatSourceAppName } from "../source-app";
 import { formatSessionModels } from "../session-models";
 import { cacheHitRate, formatCacheHitRate } from "../token-usage";
-import SessionDetailDialogs from "./SessionDetailDialogs.vue";
 import MessageTimeline from "./MessageTimeline.vue";
 import EventTimeline from "./EventTimeline.vue";
-import type {
-  DeletePlan,
-  SessionAgent,
-  SessionOverview
-} from "../types";
+import type { SessionAgent, SessionOverview } from "../types";
 import SubagentGroupDialog from "./SubagentGroupDialog.vue";
 import "./session-detail.css";
 
 type SessionDetailProps = {
   overview: SessionOverview | null;
-  deletePlan: DeletePlan | null;
   loading: boolean;
 };
 
 const props = defineProps<SessionDetailProps>();
-
-const emit = defineEmits<{
-  deleted: [sessionKey: string | null];
-}>();
 
 // 详情页 token 数用缩写+千分位精确值并列,与列表缩写口径一致。
 function exactTokens(value: number): string {
@@ -76,7 +65,6 @@ useKeepAliveScroll("sessions-detail", () => scrollContainer.value);
 // --- timeline ---
 
 const overviewRef = toRef(props, "overview");
-const deletePlanRef = toRef(props, "deletePlan");
 const { detailKey, messagesLoader, eventsLoader } = useSessionTimeline(overviewRef);
 
 // ref 解构不丢响应性,沿用原有变量名
@@ -91,22 +79,7 @@ const {
   error: eventError
 } = eventsLoader;
 
-// --- delete flow ---
-
-const {
-  deleteError,
-  deleteLoading,
-  deleteDialogOpen,
-  openDeleteDialog,
-  closeDeleteDialog,
-  handleDelete
-} = useSessionDetailActions(overviewRef, detailKey, deletePlanRef, () =>
-  // 此时 overview 还没被清掉,detailKey 就是刚删掉的这条会话的复合键
-  emit("deleted", detailKey.value)
-);
-
-// Reset UI toggles when the overview changes (dialog state resets inside
-// useSessionDetailActions).
+// Reset UI toggles when the overview changes.
 watch(overviewRef, () => {
   timelineFilter.value = "";
   closeSubagentDialog();
@@ -321,21 +294,6 @@ const timelineFilterPlaceholder = computed(() =>
             {{ overview.summary.sourceSessionId }}
           </p>
         </div>
-        <div class="detail-header-actions">
-          <button
-            v-if="deletePlan?.supported"
-            class="danger-button"
-            :disabled="deleteLoading"
-            type="button"
-            @click="openDeleteDialog"
-          >
-            {{ deleteLoading ? "删除中..." : "删除会话" }}
-          </button>
-        </div>
-      </div>
-      <div v-if="deleteError" class="error-box">
-        <strong>删除失败</strong>
-        <pre class="error-text">{{ deleteError }}</pre>
       </div>
       <dl class="summary-grid">
         <div>
@@ -481,16 +439,6 @@ const timelineFilterPlaceholder = computed(() =>
       :error="subagentDialog?.error ?? null"
       :items="subagentDialog?.items ?? []"
       @close="closeSubagentDialog"
-    />
-
-    <SessionDetailDialogs
-      v-if="deletePlan?.supported"
-      :delete-plan="deletePlan"
-      :overview="overview"
-      :delete-dialog-open="deleteDialogOpen"
-      :delete-loading="deleteLoading"
-      @close-delete-dialog="closeDeleteDialog"
-      @confirm-delete="handleDelete"
     />
 
     <div v-if="loading" class="panel-loading-overlay">

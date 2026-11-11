@@ -22,6 +22,6 @@ Pi 来源改为 family 归族形态（与 Codex/Claude Code/OpenCode 同口径�
 
 - **fork 不归族**是本方案最重要的一条边界：family 成员集合 = 主会话 + 扩展子代理会话 + tasks run，fork 留在列表顶层。代价是 fork 与父的血缘在列表上不可见（详情页 parent_session 事件仍可见）。
 - **成员 usage/模型在打开详情时才合并**（`family_usage` 逐成员走三级缓存摘要），列表阶段不付解析成本。
-- **删除单位从单文件变为 family**：删主会话连全部子代理会话文件一起删；fork 不受影响。tasks run 的转录在 agent 根下，不在删除范围内（与"删除只清 sessions 根内文件"的安全边界一致）。`PiRow.member_is_root` 在归族构造 family 时回填，供 `DeletePlanInput::from_family` 折叠成员。
+- **删除单位从单文件变为 family**：删主会话连全部子代理会话文件一起删；fork 不受影响。tasks run 的转录在 agent 根下，不在删除范围内（与"删除只清 sessions 根内文件"的安全边界一致）。`PiRow.member_is_root` 在归族构造 family 时回填，供 `DeletePlanInput::from_family` 折叠成员。（2026-11-11 补记：会话删除功能整体移除，该折叠机制与 `member_is_root` 字段随之退役，fork 不归族的边界不变，见 `2026-11-11-remove-session-deletion.md`。）
 - 旧扩展的内嵌 `details.results[].messages` 解析路径（`parse_subagent_run_block`、`pi_entry_usages` 的 subagent 分支）原样保留，历史会话的入口行、用量统计不受影响。新扩展的 `Agent` toolResult details 无 `results` 字段，自然落回普通 tool_result 块（时间线上一行"子代理"工具行 + marker 入口，与 Claude Code 的 Task 工具行为一致）。
 - **`subagent-artifacts/` 不接**：它是旧版 workflow run 的另一份记录（meta + 自定义行格式 transcript），与 `<主会话stem>/<runId>/run-0/session.jsonl`（标准会话格式、更完整）同一 runId 二选一即可，接两份会重复展示。用量统计（usage 页）同样不接 tasks run（`usage_hours` 只枚举 sessions 根内的会话文件，该口径在本次之前就如此，变更留待用量页自己提）。

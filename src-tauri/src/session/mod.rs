@@ -4,7 +4,6 @@ use anyhow::{Context, Result, anyhow, bail};
 
 pub(crate) mod catalog;
 pub(crate) mod commands;
-pub(crate) mod delete;
 pub(crate) mod jsonl;
 pub(crate) mod model;
 pub(crate) mod text;
@@ -48,13 +47,6 @@ pub(crate) trait SessionReader: Sync {
     fn parse_summary(&self, source_session_id: &str) -> Result<SessionSummary>;
 
     fn parse_overview(&self, source_session_id: &str) -> Result<SessionOverview>;
-
-    // 删除预演的结构化输入(DeletePlanInput):family 的非渲染折叠。不支持
-    // 删除的来源走默认实现——注册表里的 Unsupported 分支不会调到这里,报错
-    // 只是把"来源不支持"与"会话不存在"保持可区分。
-    fn delete_plan_input(&self, _source_session_id: &str) -> Result<delete::DeletePlanInput> {
-        bail!("该来源不支持删除")
-    }
 
     // 会话详情的正文全量返回:时间线分组器需要完整消息流才能配对调用与
     // 结果、收拢子代理入口,分页会把跨页配对变成脏数据。
@@ -160,13 +152,6 @@ pub(crate) fn clear_all_caches() -> Result<()> {
     rows_cache::RowsDb::at_store_dir()?.clear_all();
     usage_day_cache::clear_all();
     Ok(())
-}
-
-pub(crate) fn delete_session(source_app: SourceApp, source_session_id: &str) -> Result<()> {
-    match sources::spec(source_app).delete {
-        sources::DeletePolicy::Deleter { delete, .. } => delete(source_session_id),
-        sources::DeletePolicy::Unsupported { reason, .. } => bail!("{reason}"),
-    }
 }
 
 // 文件集合的新鲜度指纹:(路径, mtime, 大小) 排序串接。stat 全集合远便宜于

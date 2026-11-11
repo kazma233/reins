@@ -4,7 +4,7 @@ use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -15,9 +15,8 @@ use super::reader_engine::{
     FamilyReader, FamilySpec, Freshness, MarkerShape, MemberTimeline, RowErrorPolicy, scan_files,
 };
 use super::{
-    ContentBlock, DeletePlanAction, SessionEvent, SessionMessage, SessionModel, SessionSummary,
-    SessionTokenUsage, SourceApp, SummaryAccumulator, TimelineRecord, UsageHourBuckets,
-    delete::DeletePlanInput,
+    ContentBlock, SessionEvent, SessionMessage, SessionModel, SessionSummary, SessionTokenUsage,
+    SourceApp, SummaryAccumulator, TimelineRecord, UsageHourBuckets,
 };
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -56,10 +55,6 @@ impl FamilyRow for ClaudeSessionRow {
     // pre-engine ordering.
     fn member_tie_breaker(&self) -> std::borrow::Cow<'_, str> {
         std::borrow::Cow::Owned(self.path.display().to_string())
-    }
-
-    fn member_is_root(&self) -> bool {
-        self.is_root
     }
 }
 
@@ -216,68 +211,6 @@ pub(crate) fn engine_at(
 
 pub(crate) fn root() -> Result<PathBuf> {
     super::spec_root(SourceApp::ClaudeCode)
-}
-
-pub(crate) fn delete_session(source_session_id: &str) -> Result<()> {
-    let family = BACKEND.engine()?.family_for_id(source_session_id)?;
-    let root_session_id = family.root.summary.source_session_id.clone();
-
-    for member in &family.members {
-        fs::remove_file(&member.path)
-            .with_context(|| format!("Failed to delete {}", member.path.display()))?;
-
-        if !member.is_root {
-            let metadata_path = member.path.with_extension("meta.json");
-            if metadata_path.exists() {
-                fs::remove_file(&metadata_path)
-                    .with_context(|| format!("Failed to delete {}", metadata_path.display()))?;
-            }
-        }
-    }
-
-    remove_dir_if_exists(&root()?.join("projects").join(&root_session_id))?;
-    remove_dir_if_exists(&root()?.join("session-env").join(&root_session_id))?;
-    remove_dir_if_exists(&root()?.join("file-history").join(&root_session_id))?;
-    super::delete::prune_empty_parents(
-        root()?.join("projects"),
-        family.root.member_path().parent(),
-    );
-    BACKEND.engine()?.clear()?;
-    Ok(())
-}
-
-// delete_session 的预演,动作与顺序对齐删除实现:成员文件 → 非 root 成员的
-// .meta.json(与执行侧同口径:所有非 root 成员"存在才删",预演按完整意图
-// 列出)→ 三个 sidecar 目录。sidecar 保持 ~ 前缀拼写,由前端渲染为 $HOME 形式。
-pub(crate) fn delete_plan(input: &DeletePlanInput) -> Result<Vec<DeletePlanAction>> {
-    let mut actions = input
-        .members
-        .iter()
-        .map(|member| DeletePlanAction::RemoveFile {
-            path: member.path.display().to_string(),
-        })
-        .collect::<Vec<_>>();
-
-    for member in &input.members {
-        if member.is_root {
-            continue;
-        }
-        actions.push(DeletePlanAction::RemoveFile {
-            path: member
-                .path
-                .with_extension("meta.json")
-                .display()
-                .to_string(),
-        });
-    }
-
-    for dir in ["projects", "session-env", "file-history"] {
-        actions.push(DeletePlanAction::RemoveDirectory {
-            path: format!("~/.claude/{dir}/{}", input.root_id),
-        });
-    }
-
-    Ok(actions)
 }
 
 // Member/family ordering and the id/path maps live in the shared engine; this
@@ -686,12 +619,4 @@ fn extract_title(message: Option<&Value>) -> Option<String> {
         .filter(|block| block.kind == "text")
         .filter_map(|block| block.text)
         .find_map(|text| super::title_candidate_from_text(&text))
-}
-
-fn remove_dir_if_exists(path: &Path) -> Result<()> {
-    if path.exists() {
-        fs::remove_dir_all(path).with_context(|| format!("Failed to delete {}", path.display()))?;
-    }
-
-    Ok(())
 }

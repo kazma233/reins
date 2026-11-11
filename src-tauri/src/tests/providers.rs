@@ -2960,7 +2960,9 @@ fn zcode_reapply_replaces_models_and_keeps_user_entries() -> Result<()> {
     assert_eq!(
         rules
             .iter()
-            .filter(|rule| rule["providerId"].as_str().is_some_and(|id| id.starts_with("reins-")))
+            .filter(|rule| rule["providerId"]
+                .as_str()
+                .is_some_and(|id| id.starts_with("reins-")))
             .count(),
         1,
         "reins 条目应是条目级替换，不重复追加"
@@ -3104,13 +3106,13 @@ fn zcode_apply_derives_reasoning_values_from_boolean_flag() -> Result<()> {
             .cloned()
     };
     assert_eq!(
-        rule_of_model("model-on").expect("reasoning=true 应写值域")
-            ["config"]["optionSpecs"]["reasoningLevel"]["values"],
+        rule_of_model("model-on").expect("reasoning=true 应写值域")["config"]["optionSpecs"]["reasoningLevel"]
+            ["values"],
         json!(["low", "medium", "high"])
     );
     assert_eq!(
-        rule_of_model("model-off").expect("reasoning=false 应写关闭档")
-            ["config"]["optionSpecs"]["reasoningLevel"]["values"],
+        rule_of_model("model-off").expect("reasoning=false 应写关闭档")["config"]["optionSpecs"]["reasoningLevel"]
+            ["values"],
         json!(["disabled"])
     );
     // 无元数据且无既有叶子：不产生空规则，全部继承内置兜底。
@@ -3233,10 +3235,12 @@ fn zcode_remove_clears_entry_and_keeps_external() -> Result<()> {
         .iter()
         .find(|app| app.app == ProviderAppId::Zcode)
         .unwrap();
-    assert!(zcode
-        .entries
-        .iter()
-        .all(|entry| !entry.key.starts_with("reins-")));
+    assert!(
+        zcode
+            .entries
+            .iter()
+            .all(|entry| !entry.key.starts_with("reins-"))
+    );
     Ok(())
 }
 
@@ -3282,8 +3286,10 @@ fn zcode_remove_external_deletes_user_entry() -> Result<()> {
     let model_rules = removed["config"]["modelConfigRules"]["providerModelRules"]
         .as_array()
         .unwrap();
-    assert!(!model_rules
-        .iter()
-        .any(|rule| rule["providerId"].as_str() == Some("new-provider")));
+    assert!(
+        !model_rules
+            .iter()
+            .any(|rule| rule["providerId"].as_str() == Some("new-provider"))
+    );
     Ok(())
 }

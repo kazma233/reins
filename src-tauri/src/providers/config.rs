@@ -7,8 +7,9 @@ use anyhow::{Context, Result, bail};
 use dirs::config_dir;
 
 use super::types::{
-    ProviderAppId, ProviderAppSetting, ProviderModelInput, ProviderModelRecord, ProviderUpsertInput,
-    ProviderWriteMode, RawProvider, RawProvidersDocument, ReasoningLevel, ResolvedProvider,
+    ProviderAppId, ProviderAppSetting, ProviderModelInput, ProviderModelRecord,
+    ProviderUpsertInput, ProviderWriteMode, RawProvider, RawProvidersDocument, ReasoningLevel,
+    ResolvedProvider,
 };
 use crate::support::fs::write_atomic;
 
@@ -174,9 +175,8 @@ impl ProviderConfigStore {
         if raw_content.trim().is_empty() {
             return Ok(empty_document());
         }
-        serde_yaml::from_str(&raw_content).with_context(|| {
-            format!("providers.yaml 解析失败：{}", self.0.config_path.display())
-        })
+        serde_yaml::from_str(&raw_content)
+            .with_context(|| format!("providers.yaml 解析失败：{}", self.0.config_path.display()))
     }
 
     fn save_document_locked(&self, document: &RawProvidersDocument) -> Result<()> {

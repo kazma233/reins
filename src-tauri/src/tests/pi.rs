@@ -830,44 +830,6 @@ fn pi_reads_settings_json_session_dir_and_env_takes_precedence() -> Result<()> {
 }
 
 #[test]
-fn pi_delete_in_configured_dir_keeps_the_session_root() -> Result<()> {
-    let temp_home = env::temp_dir().join(format!("reins-test-{}", Uuid::new_v4()));
-    fs::create_dir_all(&temp_home)?;
-    let guard = TestEnvGuard::set_home(&temp_home);
-    let custom_dir = temp_home.join("custom-pi-sessions");
-    fs::create_dir_all(&custom_dir)?;
-    guard.set_pi_session_dir(&custom_dir);
-    let path = custom_dir.join("2026-09-04T10-00-00-000Z_pi-delete-custom.jsonl");
-    write_jsonl(
-        &path,
-        &[
-            pi_header(
-                "pi-delete-custom",
-                "/tmp/pi-project",
-                "2026-09-04T10:00:00.000Z",
-            ),
-            pi_entry(
-                "message",
-                "message-1",
-                None,
-                "2026-09-04T10:00:01.000Z",
-                json!({ "message": { "role": "user", "content": "custom root" } }),
-            ),
-        ],
-    )?;
-
-    session::delete::delete_session_inner(
-        &state::session_index::SessionIndexState::default(),
-        SourceApp::Pi,
-        "pi-delete-custom",
-    )?;
-    assert!(!path.exists());
-    // 用户显式配置的目录即使被清空也不能被顺手删除
-    assert!(custom_dir.exists());
-    Ok(())
-}
-
-#[test]
 fn pi_parses_v1_linear_session_with_full_history() -> Result<()> {
     let temp_home = env::temp_dir().join(format!("reins-test-{}", Uuid::new_v4()));
     fs::create_dir_all(&temp_home)?;
@@ -1534,7 +1496,12 @@ fn pi_folds_subagent_child_sessions_into_the_parent_family() -> Result<()> {
     assert_eq!(usage.input_tokens, 200);
     assert_eq!(usage.output_tokens, 100);
     assert_eq!(usage.cache_read_tokens, 20);
-    assert!(summary.models.iter().any(|model| model.model == "deepseek-flash"));
+    assert!(
+        summary
+            .models
+            .iter()
+            .any(|model| model.model == "deepseek-flash")
+    );
 
     let detail = read_detail(reader, "pi-main")?;
     let markers = detail
@@ -1566,11 +1533,7 @@ fn pi_folds_subagent_child_sessions_into_the_parent_family() -> Result<()> {
     let overview = reader.parse_overview("pi-main")?;
     assert_eq!(overview.agents.len(), 3);
     assert_eq!(
-        overview
-            .agents
-            .iter()
-            .filter(|agent| agent.is_root)
-            .count(),
+        overview.agents.iter().filter(|agent| agent.is_root).count(),
         1
     );
     assert!(
@@ -1589,75 +1552,9 @@ fn pi_folds_subagent_child_sessions_into_the_parent_family() -> Result<()> {
     )?;
     assert_eq!(agent_messages.len(), 3);
     assert_eq!(agent_messages[0].session_id.as_deref(), Some("pi-child-a"));
-    let fork_messages = session::timeline::get_session_agent_messages_inner(
-        SourceApp::Pi,
-        "pi-main",
-        "pi-fork",
-    );
+    let fork_messages =
+        session::timeline::get_session_agent_messages_inner(SourceApp::Pi, "pi-main", "pi-fork");
     assert!(fork_messages.is_err());
-
-    fs::remove_dir_all(&temp_home).ok();
-    Ok(())
-}
-
-// 删除单位是 family:主会话与全部子代理会话文件一起清;fork 子会话不属于
-// 该 family,保留。
-#[test]
-fn pi_deletes_family_members_together() -> Result<()> {
-    let temp_home = env::temp_dir().join(format!("reins-test-{}", Uuid::new_v4()));
-    fs::create_dir_all(&temp_home)?;
-    let _guard = TestEnvGuard::set_home(&temp_home);
-    let main_path = pi_path(
-        &temp_home,
-        "/tmp/pi-project",
-        "2026-10-29T03-00-00-000Z",
-        "pi-main",
-    );
-    let child_path = pi_path(
-        &temp_home,
-        "/tmp/pi-project",
-        "2026-10-29T03-01-00-000Z",
-        "pi-child",
-    );
-    let fork_path = pi_path(
-        &temp_home,
-        "/tmp/pi-project",
-        "2026-10-29T03-02-00-000Z",
-        "pi-fork",
-    );
-
-    write_jsonl(
-        &main_path,
-        &[pi_header("pi-main", "/tmp/pi-project", "2026-10-29T03:00:00.000Z")],
-    )?;
-    let mut child_header = pi_header("pi-child", "/tmp/pi-project", "2026-10-29T03:01:00.000Z");
-    child_header["parentSession"] = json!(main_path.display().to_string());
-    write_jsonl(
-        &child_path,
-        &[
-            child_header,
-            pi_entry(
-                "session_info",
-                "info-child",
-                None,
-                "2026-10-29T03:01:00.000Z",
-                json!({ "name": "scout#cccccccc" }),
-            ),
-        ],
-    )?;
-    let mut fork_header = pi_header("pi-fork", "/tmp/pi-project", "2026-10-29T03:02:00.000Z");
-    fork_header["parentSession"] = json!(main_path.display().to_string());
-    write_jsonl(&fork_path, &[fork_header])?;
-
-    let reader = session::reader(SourceApp::Pi);
-    let plan = reader.delete_plan_input("pi-main")?;
-    assert_eq!(plan.root_id, "pi-main");
-    assert_eq!(plan.members.len(), 2);
-
-    session::delete_session(SourceApp::Pi, "pi-main")?;
-    assert!(!main_path.exists());
-    assert!(!child_path.exists());
-    assert!(fork_path.exists());
 
     fs::remove_dir_all(&temp_home).ok();
     Ok(())
@@ -1680,7 +1577,11 @@ fn pi_folds_legacy_workflow_run_sessions_into_the_parent_family() -> Result<()> 
     write_jsonl(
         &main_path,
         &[
-            pi_header("pi-legacy-main", "/tmp/pi-project", "2026-10-16T09:32:05.247Z"),
+            pi_header(
+                "pi-legacy-main",
+                "/tmp/pi-project",
+                "2026-10-16T09:32:05.247Z",
+            ),
             pi_entry(
                 "message",
                 "legacy-user",
@@ -1697,7 +1598,11 @@ fn pi_folds_legacy_workflow_run_sessions_into_the_parent_family() -> Result<()> 
         .join("d460ee11-run")
         .join("run-0");
     fs::create_dir_all(&run_dir)?;
-    let mut run_header = pi_header("pi-legacy-run", "/tmp/pi-project", "2026-10-23T10:21:33.902Z");
+    let mut run_header = pi_header(
+        "pi-legacy-run",
+        "/tmp/pi-project",
+        "2026-10-23T10:21:33.902Z",
+    );
     run_header["parentSession"] = json!(main_path.display().to_string());
     write_jsonl(
         &run_dir.join("session.jsonl"),
@@ -1777,7 +1682,11 @@ fn pi_folds_subagent_task_runs_into_the_parent_family() -> Result<()> {
     write_jsonl(
         &main_path,
         &[
-            pi_header("pi-task-main", "/tmp/pi-project", "2026-10-23T02:44:12.987Z"),
+            pi_header(
+                "pi-task-main",
+                "/tmp/pi-project",
+                "2026-10-23T02:44:12.987Z",
+            ),
             pi_entry(
                 "message",
                 "task-main-user",
@@ -1792,9 +1701,7 @@ fn pi_folds_subagent_task_runs_into_the_parent_family() -> Result<()> {
         .join(".pi/agent/subagent-tasks")
         .join("e29ae30b-task");
     fs::create_dir_all(&task_dir)?;
-    let event = |kind: &str, message: Value| {
-        json!({ "type": kind, "message": message })
-    };
+    let event = |kind: &str, message: Value| json!({ "type": kind, "message": message });
     write_jsonl(
         &task_dir.join("output.jsonl"),
         &[
@@ -1839,7 +1746,12 @@ fn pi_folds_subagent_task_runs_into_the_parent_family() -> Result<()> {
     let usage = summary.token_usage.expect("task usage merged");
     assert_eq!(usage.input_tokens, 100);
     assert_eq!(usage.output_tokens, 50);
-    assert!(summary.models.iter().any(|model| model.model == "deepseek-flash"));
+    assert!(
+        summary
+            .models
+            .iter()
+            .any(|model| model.model == "deepseek-flash")
+    );
 
     let detail = read_detail(reader, "pi-task-main")?;
     // marker + 流式增量(message_start)不入时间线,只有 message_end 的最终消息

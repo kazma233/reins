@@ -1,8 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { SourceSelection } from "./source-app";
 import type {
-  DeletePlan,
-  DeleteSessionResult,
   SessionMessage,
   SessionPage,
   SessionEvent,
@@ -94,18 +92,4 @@ export function getSessionEvents(
     sourceApp,
     sourceSessionId
   });
-}
-
-export function getDeletePlan(
-  sourceApp: SourceApp,
-  sourceSessionId: string
-): Promise<DeletePlan> {
-  return invoke("get_delete_plan", { sourceApp, sourceSessionId });
-}
-
-export function deleteSession(
-  sourceApp: SourceApp,
-  sourceSessionId: string
-): Promise<DeleteSessionResult> {
-  return invoke("delete_session", { sourceApp, sourceSessionId });
 }

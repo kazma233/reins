@@ -112,7 +112,11 @@ impl ModelTally {
         }
 
         let candidate = SessionModel::new(provider, model);
-        match self.entries.iter_mut().find(|(entry, _)| *entry == candidate) {
+        match self
+            .entries
+            .iter_mut()
+            .find(|(entry, _)| *entry == candidate)
+        {
             Some((_, count)) => *count += 1,
             None => self.entries.push((candidate, 1)),
         }
@@ -396,42 +400,6 @@ pub(crate) struct SessionOverview {
 #[derive(Clone, Debug, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/features/sessions/generated/")]
-pub(crate) struct DeleteSessionResult {
-    pub(crate) source_app: SourceApp,
-    pub(crate) deleted_session_id: String,
-    pub(crate) deleted_paths: Vec<String>,
-}
-
-// 一次会话删除的预演:动作清单与说明文案都由后端来源注册表给出,前端确认框
-// 只渲染,不再持有 per-source 删除语义。
-#[derive(Clone, Debug, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../src/features/sessions/generated/")]
-pub(crate) struct DeletePlan {
-    pub(crate) source_app: SourceApp,
-    /// false 时仅 reason 有意义:删除入口隐藏,不进对话框。
-    pub(crate) supported: bool,
-    #[ts(optional)]
-    pub(crate) reason: Option<String>,
-    pub(crate) description: String,
-    pub(crate) details: Vec<String>,
-    pub(crate) command_label: String,
-    pub(crate) actions: Vec<DeletePlanAction>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-#[ts(export, export_to = "../../src/features/sessions/generated/")]
-pub(crate) enum DeletePlanAction {
-    RemoveFile { path: String },
-    RemoveDirectory { path: String },
-    RunCli { program: String, args: Vec<String> },
-    Sqlite { db_path: String, sql: String },
-}
-
-#[derive(Clone, Debug, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../src/features/sessions/generated/")]
 pub(crate) struct SessionPage {
     // None 表示合并视图（跨来源分页），Some 表示单一来源。
     pub(crate) source_app: Option<SourceApp>,
@@ -525,7 +493,10 @@ mod tests {
 
         let models = tally.into_models();
         assert_eq!(models.len(), 3);
-        assert_eq!(models[0], SessionModel::new(Some("first"), "deepseek-flash"));
+        assert_eq!(
+            models[0],
+            SessionModel::new(Some("first"), "deepseek-flash")
+        );
     }
 
     #[test]

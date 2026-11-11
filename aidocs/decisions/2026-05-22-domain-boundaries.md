@@ -14,7 +14,7 @@
 
 ### `sessions`
 
-1. 负责 sources 探测、会话列表、overview、timeline、删除。
+1. 负责 sources 探测、会话列表、overview、timeline（不做会话删除，见 `2026-11-11-remove-session-deletion.md`）。
 2. 只依赖 `shared/*` 和 `app/*` 的稳定入口。
 3. 不依赖 `features/workspace/*`。
 
@@ -39,10 +39,10 @@
 
 ### `session`
 
-1. 负责 Codex / Claude Code / OpenCode 的会话发现、解析、overview、timeline、删除。
+1. 负责 Codex / Claude Code / OpenCode 的会话发现、解析、overview、timeline（不做会话删除，见 `2026-11-11-remove-session-deletion.md`）。
 2. `model.rs` 只定义 session DTO 和内部 timeline/cache 数据。
 3. `commands.rs` 只负责 Tauri command 入参与调度。
-4. 来源的静态分发知识（根目录、探测文案、读取器、删除策略、用量采集方式）唯一持于 `sources.rs` 注册表；新增来源 = 新 reader 文件 + 一条注册，详见 `2026-10-08-session-source-registry.md`。
+4. 来源的静态分发知识（根目录、探测文案、读取器、用量采集方式）唯一持于 `sources.rs` 注册表；新增来源 = 新 reader 文件 + 一条注册，详见 `2026-10-08-session-source-registry.md`。
 
 ### `workspace`
 
