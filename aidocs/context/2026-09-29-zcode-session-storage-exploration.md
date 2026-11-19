@@ -3,6 +3,7 @@
 - 日期:2026-09-29
 - 性质:探索记录。为历史会话功能新增 zcode 来源提供的一手实测证据(zcode 3.14.4 桌面版本机数据)、官方文档与 CLI bundle 实证结论,以及据此确定的接入方案。实现前的决策依据,实现落地后由代码与测试取代。
 - 探索环境:macOS,ZCode.app 3.14.4(`ZCODE_APP_VERSION` 实测),会话库 13 sessions / 1348 messages / 4952 parts。
+- 2026-11-19 迁移注记:文中 Rust/serde 表述（如 `SourceApp` 的 serde 枚举名）为当时的实现语言;wire 值不变仍是现行契约,Go 实现见 `internal/session/`。
 
 ## 结论(TLDR)
 

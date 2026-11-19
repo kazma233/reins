@@ -4,6 +4,8 @@
 
 最后核实：2026-09-15，实测版本 Grok 1.0.30、Codex 0.149.1、OpenCode 1.18.30。Claude Code、ZCode 本机没有 CLI，未实测。2026-09-29 复核：OpenCode 升到 v2.0.18 后 MCP 节点从顶层 `mcp` 变为 `mcp.servers`，旧位置不被识别（`opencode mcp list` 为空），下文 OpenCode 相关行已按 v2 更新。2026-09-30 复核：Pi 0.99.1 新增 MCP 支持（`<agentDir>/mcp.json` 顶层 `mcpServers`，legacy SSE 被拒绝），下文 Pi 行已更新，Reins 的 pi preset 已默认填入该路径。
 
+2026-11-19 注记：实现已从 Rust 迁到 Go（`internal/workspace/`），文中 `src-tauri/src/workspace/mcps.rs` 为 Rust 时代路径；配置文件格式判定已从「内容探测优先、后缀兜底」改为只按后缀（见 `decisions/2026-11-19-mcp-format-detection-by-extension.md`）。
+
 ## 1. 问题
 
 Reins 的 MCP 领域模型是统一口径（`mcps:` 下的 name、enabled、transport、command/args/env、url/headers、timeout）。写出时按 target 的 `mcp.config_type` 选模板（`src-tauri/src/workspace/mcps.rs`），读取时按 target 的 `config_prefix` 取原始值。

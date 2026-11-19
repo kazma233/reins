@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Name=Reins
+Comment=Read and inspect local coding-agent sessions.
+# The Exec line includes %u to pass the URL to the application
+Exec=/usr/local/bin/reins %u
+Terminal=false
+Type=Application
+Icon=reins
+Categories=Utility;
+StartupWMClass=reins
+
+ 

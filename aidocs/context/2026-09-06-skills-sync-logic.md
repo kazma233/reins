@@ -2,6 +2,8 @@
 
 本文以当前源码为准，说明 Skills source 如何被发现、缓存并同步到 targets。这里的“同步”只指 Skills 目录分发，不包括 MCP 配置分发。
 
+2026-11-19 迁移注记：本文写于 Rust 时代，「当前源码」指 `src-tauri/src/workspace/*`（路径已随迁移退役）；现行实现在 `internal/workspace/`，同步契约以 aidocs 决策与代码为准。
+
 ## 1. 核心模型
 
 ### 1.1 Source

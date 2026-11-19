@@ -40,5 +40,5 @@
 
 ## 关联
 
-- 契约变更记录见 `2026-05-22-frontend-backend-contracts.md`（`refresh_git_skill_source` 返回值、新增 `cancel_skill_source_fetch`）。
+- 契约变更记录见 `../archive/2026-05-22-frontend-backend-contracts.md`（已失效，替代见 `2026-11-19-go-wails3-migration.md`；`refresh_git_skill_source` 返回值、新增 `cancel_skill_source_fetch`）。
 - 行为测试：`src-tauri/src/tests/workspace_fetch_cancel.rs`。

@@ -3,6 +3,7 @@
 - 日期:2026-10-07
 - 性质:探索记录 + v1 接入方案。证据来源:官方源码 github.com/deepseek-ai/deepseek-harness(master)、官方文档站、Windows 本机实测(桌面版 DeepSeek Harness,`~/.dsh` 含 3 个已落盘会话,其中 1 个 261 事件的完整真实会话)。
 - 已确认决策:v1 不支持会话删除;zstd 解压用 `ruzstd`(纯 Rust);范围含 sessions 来源、usage 统计、workspace target(skills+MCP)、providers 域,一次做完。
+- 2026-11-19 迁移注记:zstd 选型已换 `klauspost/compress`(见 `decisions/2026-11-19-go-wails3-migration.md`),实现落位 `internal/session/`;文末的 cargo/pnpm 验收命令为 Rust 时代记录,现行验收见仓库根 AGENTS.md。
 
 ## 结论(TL;DR)
 

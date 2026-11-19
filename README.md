@@ -61,28 +61,25 @@ Skills 来源支持本地目录与 Git 仓库（Git 支持 ref 与 include name/
 
 ## 开发与构建
 
-技术栈：Tauri v2（前端 Vue 3 + TypeScript + Vite，后端 Rust）。
+技术栈：Wails v3（前端 Vue 3 + TypeScript + Vite，后端 Go）。
 
 环境要求：
 
+- Go ≥ 1.26（go.mod 口径）与 [wails3 CLI](https://v3.wails.io/learn/install/)（`go install github.com/wailsapp/wails/v3/cmd/wails3@latest`）
 - Node.js ≥ 20.19（Vite 8 的最低要求）与 pnpm
-- Rust stable（≥ 1.85，edition 2024）
-- 各平台系统依赖见 [Tauri v2 官方文档](https://v2.tauri.app/start/prerequisites/)
+- [go-task](https://taskfile.dev/)（`task` 命令，dev / build / package 经 Taskfile 分发）
+- 各平台系统依赖见 [Wails v3 官方文档](https://v3.wails.io/learn/install/)
 
 常用命令：
 
 ```bash
-pnpm install                # 安装前端依赖
-pnpm tauri dev              # 本地开发运行
-pnpm check                  # 类型与编译检查（vue-tsc --noEmit + cargo check）
-pnpm test                   # 前端单元测试（vitest）
-pnpm build                  # 前端类型检查 + 构建
-pnpm codegen                # 重新导出 ts-rs 生成的 TS 绑定（改 Rust 侧契约后运行）
-pnpm tauri build            # 打包当前平台的安装包
-cargo test --manifest-path src-tauri/Cargo.toml   # Rust 测试
+pnpm install                # 安装前端依赖（frontend/ 下）
+task dev                    # 开发运行（wails3 dev）
+task build                  # 生产构建（bindings → 前端 → bin/reins）
+pnpm check                  # 类型与编译检查（vue-tsc --noEmit，frontend/ 下）
+pnpm test                   # 前端单元测试（vitest，frontend/ 下）
+go test ./internal/...      # Go 测试（必须全量，不要单包截短收尾）
 ```
-
-Rust 测试请全量运行，不要用 `cargo test --lib` 截短。
 
 ## 图标
 

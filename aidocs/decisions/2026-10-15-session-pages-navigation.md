@@ -35,7 +35,7 @@
 
 左栏底部固定一个「关于」入口，进的是整屏页（`appMode = "about"`，不是弹窗）。它是**左栏的顶层页**，
 与配置与分发/模型配置/历史会话平级，所以页面内不放返回——换页由左栏承担；在关于页时左栏把「关于」
-自己点亮。版本取自 `getVersion()`（tauri.conf.json 单一来源），工具名取自 `agent-labels.ts` 共享常量表。
+自己点亮。版本取自 `AppInfoService.Version()`（`appinfo.go` 常量，与 `build/config.yml`、`frontend/package.json` 同步维护，一致性有测试钉住），工具名取自 `agent-labels.ts` 共享常量表。（2026-11-19 迁移注记：Rust 时代为 `getVersion()`，来源 tauri.conf.json。）
 
 只有"从别处钻进去的子页"才带返回入口：用量统计从会话列表进，所以它有「← 返回」。
 

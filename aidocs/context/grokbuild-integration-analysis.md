@@ -6,6 +6,8 @@
 
 > 2026-09-22 后续变更：会话跨程序导入/转出功能已整体移除（含 `preview_import`、`import_session`、各来源导出器与恢复命令 `manualOpenCommand` 系列）。本节中"转出到 Claude/Pi""恢复命令""不支持导入到 Grok"等表述仅保留为当时的实施记录。
 
+> 2026-11-19 迁移注记：下文引用的 `src-tauri/src/...` 路径与 `cargo test --manifest-path src-tauri/Cargo.toml` 验收命令已随 Rust 退役；现行实现对应 `internal/workspace/` 与 `internal/session/`，验收命令见仓库根 AGENTS.md。
+
 - 已实现全局/项目 `grokbuild` target、Skill 分发注册、Grok TOML MCP schema，支持 `GROK_HOME`，旧配置不自动迁移。
 - 隔离 Grok 1.0.30 检查确认软链接 Skill 可被发现；MCP timeout 要求整数秒，非整秒毫秒值明确拒绝。
 - 用户授权只读检查真实 sessions 后，确认布局为 `sessions/<bucket>/<id>/summary.json`，格式版本 1；cwd 从 `summary.info.cwd` 读取，不推测 bucket 编码。

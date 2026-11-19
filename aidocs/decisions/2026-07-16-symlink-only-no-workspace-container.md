@@ -109,4 +109,4 @@
 ## 后续工作
 
 - **project manifest 机制（Phase 6 预留）**：当前 `projects` 的定义已进入 config，但 project target 如何与具体项目目录、项目级 manifest 联动尚未最终定型。后续会在 Phase 6 阶段补一份独立的 ADR，明确 project target 的安装状态判定、软链落点以及与全局 target 的差异边界。
-- **迁移与文档对齐**：在落地过程中同步更新 README、前后端 contract 对照表（`aidocs/decisions/2026-05-22-frontend-backend-contracts.md`）以及测试，确保不再残留 `workspace_name`、`workspace_path`、`missing` 等旧字段，以及「真 copy」相关描述。
+- **迁移与文档对齐**：在落地过程中同步更新 README、前后端 contract 对照表（`aidocs/archive/2026-05-22-frontend-backend-contracts.md`，已失效，替代见 `2026-11-19-go-wails3-migration.md`）以及测试，确保不再残留 `workspace_name`、`workspace_path`、`missing` 等旧字段，以及「真 copy」相关描述。

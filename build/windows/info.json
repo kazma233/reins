@@ -1,0 +1,17 @@
+{
+	"fixed": {
+		"file_version": "0.3.0",
+		"product_version": "0.3.0"
+	},
+	"info": {
+		"0409": {
+			"FileVersion": "0.3.0",
+			"ProductVersion": "0.3.0",
+			"CompanyName": "kazma",
+			"FileDescription": "Read and inspect local coding-agent sessions.",
+			"LegalCopyright": "(c) 2026, kazma",
+			"ProductName": "Reins",
+			"Comments": "Read and inspect local coding-agent sessions."
+		}
+	}
+}

@@ -26,3 +26,11 @@ dist-ssr
 .agents
 .pi
 .zcode
+# wails3 构建产物
+bin/
+
+# go-task 任务缓存
+.task/
+
+# TypeScript composite 增量信息
+*.tsbuildinfo

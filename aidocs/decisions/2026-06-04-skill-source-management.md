@@ -98,4 +98,4 @@ helper `purge_skill_from_targets` 删除；`delete_workspace_skill_inner` 恢复
 - `src/features/workspace/panels.tsx` (按钮文案 / prop 重命名)
 - `src/features/workspace/styles.css` (新 class)
 - `README.md`
-- `aidocs/decisions/2026-05-22-frontend-backend-contracts.md`
+- `aidocs/archive/2026-05-22-frontend-backend-contracts.md`（已失效，替代见 `2026-11-19-go-wails3-migration.md`）

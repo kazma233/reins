@@ -2,6 +2,7 @@
 
 - 日期：2026-05-22
 - 状态：生效中
+- 迁移注记（2026-11-19）：Tauri→Go/Wails v3 迁移后，本文 Rust 侧表述（`src-tauri/src/<域>/`、`model.rs`、`commands.rs`、`types.rs`、`config.rs`、`catalog.rs`、`keychain.rs` 等）按 Go `internal/<域>/` 对应文件理解，依赖红线本身不变；见 `2026-11-19-go-wails3-migration.md`。
 
 ## 命名约定
 

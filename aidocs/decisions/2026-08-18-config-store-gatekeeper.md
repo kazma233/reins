@@ -2,6 +2,7 @@
 
 - 日期：2026-08-18
 - 状态：生效中
+- 2026-11-19 迁移注记：守门人机制按 Go 语义平移——`WorkspaceConfigStore` 在 `internal/workspace/config.go`，由 main.go 构造 service 时注入（不再有 `tauri::State`）；「新增命令必须经 store 传给 `*_inner`、配置写一律原子写」的约束不变。下文 Rust 路径与 cargo 验证仅作历史记录。
 
 ## 背景
 

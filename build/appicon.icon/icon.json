@@ -1,0 +1,19 @@
+{
+  "groups" : [
+    {
+      "layers" : [
+        {
+          "image-name" : "reins_icon.png",
+          "name" : "reins_icon",
+          "position" : {
+            "scale" : 1.0,
+            "translation-in-points" : [
+              0.0,
+              0.0
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

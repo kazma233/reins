@@ -61,7 +61,7 @@
 
 - 域：workspace 前端；强度：Worth exploring；(b) 完成于 2026-10-12
 - 问题：(a) `projectId:agentId` 拆分规则泄漏（实施 C2 后同步弹窗那处已随契约收掉，现存 `workspace/model.ts:26-34` 与 `McpPanel.vue:80-83` 两处；`groupTargetIds` 仍先格式化成展示文本再按 `/` 反解析）；(b) mcp 表单 parse/format/validate 三件套困在 `useMcpMutations.ts`（68-135, 241-262, 284-310）私有函数里，行级校验零直接测试——对照 providers/model.ts:397-511 + 533 行测试的已验证形态；(c) agent 清单前端残留第六份拷贝 `AVAILABLE_PROJECT_AGENTS`（`model.ts:262`，不锚定生成类型）与死导出 `BuiltinTargetPresetId`（71-78）。
-- 方向：先做 (b)（照抄 providers 模板，收益/风险比最高）；(a) `parseTargetId` 单点；(c) Rust 侧 codegen 导出 AGENT_IDS 派生、死导出删除（不得手改生成文件）。
+- 方向：先做 (b)（照抄 providers 模板，收益/风险比最高）；(a) `parseTargetId` 单点；(c) Rust 侧 codegen 导出 AGENT_IDS 派生、死导出删除（不得手改生成文件）。（2026-11-19：本条为 Rust 时代完成记录，codegen 面已由 wails bindings + `internal/agents` 导出测试承接。）
 - (a)(c) 已做：`parseTargetId` 成为地址拆分的唯一点（`formatTargetLabel` 与
   `McpPanel` 都走它），`groupTargetIds` 不再「先格式化成展示文本再按 `/` 反解析」——
   那层二级假设依赖展示格式，agent 名里出现 `/` 就会归错组；新增 3 条直测（含多冒号
@@ -192,7 +192,7 @@
 
 ## 已取消立项：测试隔离去进程环境依赖
 
-- 结论：**决定不做**。详见 `decisions/2026-10-12-test-env-lock-is-by-design.md`。
+- 结论：**决定不做**。详见 `archive/2026-10-12-test-env-lock-is-by-design.md`（机制已随 Rust 退役）。
 - 摘要：去锁并行 87 failed、去锁串行 442 passed，即零顺序依赖、失败全部是并发争用；
   而争用来自 `env::set_var` 的进程级作用域与各域夹具需要不同值这一事实。
   收益约 0.6s 墙钟，无用户可见故障，与「只在存在真实契约时增加抽象」冲突。
