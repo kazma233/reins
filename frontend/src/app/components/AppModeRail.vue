@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { computed } from "vue";
 import type { AppMode } from "../app-mode";
 import "./app-mode-rail.css";
 
@@ -7,25 +6,20 @@ type AppModeRailProps = {
   mode: AppMode;
 };
 
-const props = defineProps<AppModeRailProps>();
+defineProps<AppModeRailProps>();
 
 defineEmits<{
   change: [mode: AppMode];
   about: [];
 }>();
 
-// 用量统计不在左栏:它的入口在会话列表顶栏,返回入口在统计页顶部,两条路成对
-// 出现,不必再占一个常驻条目。停在统计页时把"历史会话"点亮——它就是从那里进去
-// 的子页,否则整条栏没有任何选中项,看起来像坏了。
+// 四个模式平级,选中态就是当前模式本身。
 const MODE_COPY: Array<{ id: AppMode; label: string }> = [
   { id: "workspace", label: "配置与分发" },
   { id: "providers", label: "模型配置" },
   { id: "sessions", label: "历史会话" },
+  { id: "usage", label: "会话统计" },
 ];
-
-const activeMode = computed<AppMode>(() =>
-  props.mode === "usage" ? "sessions" : props.mode
-);
 </script>
 
 <template>
@@ -33,12 +27,12 @@ const activeMode = computed<AppMode>(() =>
     <button
       v-for="item in MODE_COPY"
       :key="item.id"
-      :class="`app-mode-rail__button${item.id === activeMode ? ' is-active' : ''}`"
+      :class="`app-mode-rail__button${item.id === mode ? ' is-active' : ''}`"
       type="button"
-      :aria-current="item.id === activeMode ? 'true' : undefined"
+      :aria-current="item.id === mode ? 'true' : undefined"
       @click="$emit('change', item.id)"
     >
-      <!-- puzzle：Skills & MCP 属于 agent 的扩展能力（lucide 线性图标风格）；cpu：模型/Provider 语义；history：会话语义 -->
+      <!-- puzzle：Skills & MCP 属于 agent 的扩展能力（lucide 线性图标风格）；cpu：模型/Provider 语义；history：会话语义；trending-up：统计曲线语义 -->
       <span class="app-mode-rail__icon">
         <svg
           v-if="item.id === 'workspace'"
@@ -75,6 +69,20 @@ const activeMode = computed<AppMode>(() =>
           <path d="M20 9h2" />
           <path d="M9 2v2" />
           <path d="M9 20v2" />
+        </svg>
+        <svg
+          v-else-if="item.id === 'usage'"
+          aria-hidden="true"
+          fill="none"
+          stroke="currentColor"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="2"
+          viewBox="0 0 24 24"
+        >
+          <!-- lucide trending-up -->
+          <path d="M22 7 13.5 15.5 8.5 10.5 2 17" />
+          <path d="M16 7h6v6" />
         </svg>
         <svg
           v-else

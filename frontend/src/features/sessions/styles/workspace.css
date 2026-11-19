@@ -28,15 +28,11 @@
   padding: 14px 16px 0;
 }
 
-/* 顶栏一行放来源与筛选:来源自带标签,筛选靠 placeholder 说明自己。
-   两组底边对齐,不因一侧有标签而错位;窄窗口整组换行。 */
+/* 页头行内结构在共享页头(AppPageHeader)里;底部分隔线与其他页同口径 */
 .sessions-list-header {
-  display: flex;
   flex: 0 0 auto;
-  align-items: flex-end;
-  flex-wrap: wrap;
-  gap: 12px;
-  min-width: 0;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--color-hairline-soft);
 }
 
 .sessions-list-header .source-switcher {
@@ -116,21 +112,18 @@
   height: 18px;
 }
 
-/* 会话统计入口:顶栏最右,与筛选之间留出间距把它和筛选控件分开 */
-.sessions-stats-button {
-  display: inline-flex;
+/* 刷新入口:钉在顶栏最右,与筛选之间由 margin-left auto 撑开。
+   固定最小宽度:文案在「刷新/刷新中」之间切换时按钮几何不动。 */
+.sessions-refresh-button {
   flex: 0 0 auto;
-  align-self: flex-end;
-  align-items: center;
-  gap: 6px;
-  min-height: var(--button-height);
+  min-width: 88px;
   margin-left: auto;
   padding: 0 12px;
 }
 
-.sessions-stats-button__icon {
-  width: 16px;
-  height: 16px;
+/* 刷新进行中:文字变主色,加载态由按钮自身表达 */
+.sessions-refresh-button.is-refreshing {
+  color: var(--color-primary);
 }
 
 /* 来源检测期间的加载动画:细进度条放在正文中心,顶栏那个位置离内容太远,
@@ -167,7 +160,7 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* 与用量页的加载条同实现:transform 位移(合成器动画,不触发布局),
+/* 与会话统计页的加载条同实现:transform 位移(合成器动画,不触发布局),
    减弱动效时滑块停在轨道外,只剩静态轨道与耗时文案。 */
 .sessions-loading__bar::after {
   content: "";

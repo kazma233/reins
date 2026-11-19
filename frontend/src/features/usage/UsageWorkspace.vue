@@ -2,8 +2,8 @@
 import { computed, onMounted, watch } from "vue";
 import { useLoadElapsed } from "@shared/lib/use-load-elapsed";
 import AppCard from "@shared/ui/AppCard.vue";
+import AppPageHeader from "@shared/ui/AppPageHeader.vue";
 import AppSelect, { type AppSelectOption } from "@shared/ui/AppSelect.vue";
-import BackLink from "@shared/ui/BackLink.vue";
 import UsageMetricsRow from "./components/UsageMetricsRow.vue";
 import UsageTrendChart from "./components/UsageTrendChart.vue";
 import { useUsageState } from "./composables/useUsageState";
@@ -32,8 +32,6 @@ import {
 import type { UsageSourceStats } from "./types";
 import { totalConsumedTokens } from "../sessions/token-usage";
 import "./styles.css";
-
-defineEmits<{ back: [] }>();
 
 const {
   stats,
@@ -159,50 +157,47 @@ const chartSeries = computed(() =>
 
 <template>
   <div class="usage-workspace">
+    <!-- 吸顶外壳自持(padding/背景/底边线),行内结构交给共享页头 -->
     <header class="usage-header">
-      <div class="usage-header__inner">
-        <div class="usage-header__main">
-          <BackLink @back="$emit('back')" />
-          <h2 class="usage-header__title">用量统计</h2>
-          <p class="usage-header__meta">按会话内消耗事件的实际时间归日统计</p>
-        </div>
-        <div class="usage-header__actions">
-          <AppSelect
-            v-model="sourceSelectValue"
-            aria-label="选择 Agent 工具"
-            class-name="usage-filter-select"
-            label="Agent"
-            :options="sourceOptions"
-          />
-          <AppSelect
-            v-model="modelSelectValue"
-            aria-label="选择模型"
-            class-name="usage-filter-select"
-            label="模型"
-            :options="modelOptions"
-          />
-          <div class="usage-window-switcher" role="group" aria-label="时间窗口">
-            <button
-              v-for="option in USAGE_WINDOWS"
-              :key="option.days"
-              type="button"
-              :class="`usage-window-switcher__button${option.days === windowDays ? ' is-active' : ''}`"
-              @click="setWindowDays(option.days)"
-            >
-              {{ option.label }}
-            </button>
-          </div>
-          <!-- 加载中只置灰,不改文案:文案一变按钮宽度会跳 -->
+      <AppPageHeader
+        meta="按会话内消耗事件的实际时间归日统计"
+        title="会话统计"
+      >
+        <AppSelect
+          v-model="sourceSelectValue"
+          aria-label="选择 Agent 工具"
+          class-name="usage-filter-select"
+          label="Agent"
+          :options="sourceOptions"
+        />
+        <AppSelect
+          v-model="modelSelectValue"
+          aria-label="选择模型"
+          class-name="usage-filter-select"
+          label="模型"
+          :options="modelOptions"
+        />
+        <div class="usage-window-switcher" role="group" aria-label="时间窗口">
           <button
+            v-for="option in USAGE_WINDOWS"
+            :key="option.days"
             type="button"
-            class="secondary-button usage-refresh-button"
-            :disabled="loading"
-            @click="loadUsageStats"
+            :class="`usage-window-switcher__button${option.days === windowDays ? ' is-active' : ''}`"
+            @click="setWindowDays(option.days)"
           >
-            刷新
+            {{ option.label }}
           </button>
         </div>
-      </div>
+        <!-- 加载中只置灰,不改文案:文案一变按钮宽度会跳 -->
+        <button
+          type="button"
+          class="secondary-button usage-refresh-button"
+          :disabled="loading"
+          @click="loadUsageStats"
+        >
+          刷新
+        </button>
+      </AppPageHeader>
     </header>
 
     <p v-if="error" class="usage-error">

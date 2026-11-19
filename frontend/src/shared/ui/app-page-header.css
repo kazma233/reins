@@ -1,0 +1,41 @@
+/* 顶层页统一页头(会话统计/历史会话/配置与分发/模型配置共用):
+   标题块与控件组底边对齐,不因一侧带标签而错位;窄窗口整组换行。
+   标题字号与页内卡片标题拉开一档,是四页唯一的 h2 层级。 */
+.app-page-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  min-width: 0;
+}
+
+.app-page-header__main {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.app-page-header__title {
+  margin: 0;
+  font-size: var(--font-size-2xl);
+  font-weight: 600;
+  color: var(--color-ink);
+}
+
+.app-page-header__meta {
+  margin: 4px 0 0;
+  font-size: var(--font-size-xs);
+  color: var(--color-body);
+}
+
+/* 控件组吃掉标题之外的剩余宽度,内容靠右收拢;
+   需要横向拉伸的控件(如会话搜索框)在插槽里自行 flex-grow。 */
+.app-page-header__actions {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: flex-end;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 12px;
+  min-width: 0;
+}

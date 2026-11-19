@@ -30,19 +30,14 @@ function changeAppMode(mode: AppMode) {
       @change="changeAppMode"
     />
     <div class="app-main">
-      <!-- 会话工作区用 KeepAlive 保留:去用量统计看曲线再回来,搜索词、排序、
-           已加载的页、列表数据与滚动位置都还在。其余模式维持原有的卸载重建行为。 -->
+      <!-- 会话工作区用 KeepAlive 保留:切到其他模式再回来,搜索词、排序、
+           已加载的页、列表数据与滚动位置都还在。其余模式维持原有的卸载重建行为,
+           会话统计页的数据也是每次进入重新拉取。 -->
       <KeepAlive>
-        <SessionWorkspace
-          v-if="appMode === 'sessions'"
-          @open-usage="changeAppMode('usage')"
-        />
+        <SessionWorkspace v-if="appMode === 'sessions'" />
       </KeepAlive>
       <ProvidersWorkspace v-if="appMode === 'providers'" />
-      <UsageWorkspace
-        v-else-if="appMode === 'usage'"
-        @back="changeAppMode('sessions')"
-      />
+      <UsageWorkspace v-else-if="appMode === 'usage'" />
       <Workspace v-else-if="appMode === 'workspace'" />
       <AboutWorkspace v-else-if="appMode === 'about'" />
     </div>

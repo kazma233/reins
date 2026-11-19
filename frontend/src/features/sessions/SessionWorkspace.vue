@@ -22,11 +22,10 @@ import type { SessionPage, SessionSummary, SourceStatus } from "./types";
 import { extractErrorMessage } from "@shared/lib/errors";
 import { createRequestGuard } from "@shared/lib/request-guard";
 import AppLoadError from "@shared/ui/AppLoadError.vue";
+import AppPageHeader from "@shared/ui/AppPageHeader.vue";
 
 const SESSION_PAGE_SIZE = 20;
 const SESSION_QUERY_DEBOUNCE_MS = 200;
-
-const emit = defineEmits<{ openUsage: [] }>();
 
 const sessionStore = useSessionWorkspaceState();
 const {
@@ -384,11 +383,6 @@ function openSession(sessionKey: string) {
 function backToList() {
   view.value = "list";
 }
-
-// 会话统计是另一个顶层视图(用量统计),这里只做跳转,不复制它的状态。
-function openUsageStats() {
-  emit("openUsage");
-}
 </script>
 
 <template>
@@ -396,8 +390,12 @@ function openUsageStats() {
     <!-- 列表页:整屏宽度,来源与筛选在顶部,列表自身滚动 -->
     <section v-if="view === 'list'" class="sessions-list-page">
       <div class="sessions-list-page__inner">
-        <!-- 顶栏一行:来源切换 + 筛选/排序(整屏宽度下不再需要两行) -->
-        <header class="sessions-list-header">
+        <!-- 行内结构交给共享页头;类名留在组件根上,来源下拉的 280px 定宽钩子还在 -->
+        <AppPageHeader
+          class="sessions-list-header"
+          meta="读取各 AI 编码工具本地目录中的会话记录"
+          title="历史会话"
+        >
           <SourceSwitcher
             :disabled="
               refreshing ||
@@ -405,11 +403,9 @@ function openUsageStats() {
               loadingSessions ||
               loadingMoreSessions
             "
-            :refreshing="refreshing"
             :selected-source="selectedSource"
             :sources="sources"
             @change="handleSourceChange"
-            @refresh="handleRefresh"
           />
           <div class="sessions-filter">
             <input
@@ -447,27 +443,26 @@ function openUsageStats() {
             </button>
           </div>
           <button
-            class="secondary-button sessions-stats-button"
+            :aria-label="refreshing ? '刷新中' : '刷新会话来源'"
+            :class="
+              joinClasses(
+                'secondary-button',
+                'sessions-refresh-button',
+                refreshing && 'is-refreshing'
+              )
+            "
+            :disabled="
+              refreshing ||
+              loadingSources ||
+              loadingSessions ||
+              loadingMoreSessions
+            "
             type="button"
-            @click="openUsageStats"
+            @click="handleRefresh"
           >
-            <!-- lucide trending-up:与左栏"用量统计"同一个图标 -->
-            <svg
-              aria-hidden="true"
-              class="sessions-stats-button__icon"
-              fill="none"
-              stroke="currentColor"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              viewBox="0 0 24 24"
-            >
-              <path d="M22 7 13.5 15.5 8.5 10.5 2 17" />
-              <path d="M16 7h6v6" />
-            </svg>
-            会话统计
+            {{ refreshing ? "刷新中" : "刷新" }}
           </button>
-        </header>
+        </AppPageHeader>
         <AppLoadError
           v-if="sourceError"
           :message="sourceError"

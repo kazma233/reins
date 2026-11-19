@@ -11,9 +11,24 @@ import type {
 } from "./types";
 
 export const WORKSPACE_TAB_COPY = [
-  { id: "targets", label: "targets" },
-  { id: "skills", label: "skills" },
-  { id: "mcp", label: "mcp" },
+  {
+    id: "targets",
+    label: "targets",
+    title: "分发目标",
+    hint: "每个工具的配置位置，分全局和项目两级",
+  },
+  {
+    id: "skills",
+    label: "skills",
+    title: "技能来源",
+    hint: "从 git 仓库或本地目录找到 skill，装到各个工具里",
+  },
+  {
+    id: "mcp",
+    label: "mcp",
+    title: "MCP 服务",
+    hint: "集中管理 MCP 服务，写进各个工具的配置文件",
+  },
 ] as const;
 
 // agent 名按统一的产品名渲染（生成物，与历史会话来源、providers 同一份

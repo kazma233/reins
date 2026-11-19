@@ -1,7 +1,7 @@
 import { formatTokenCount } from "@shared/lib/format";
 import type { SessionTokenUsage } from "./types";
 
-// 会话 token 展示口径的唯一来源：会话列表 chip、会话详情、用量统计
+// 会话 token 展示口径的唯一来源：会话列表 chip、会话详情、会话统计
 // 共用；将来加 token 桶只改这里。
 
 // 总消耗 = 四项之和：经过模型的全部 token，分项明细留在详情页。

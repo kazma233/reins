@@ -5,12 +5,12 @@ import { extractErrorMessage } from "@shared/lib/errors";
 import type { UsageStats } from "../types";
 import { ALL_MODELS } from "../model";
 
-// 筛选偏好跟着应用走(模块级):离开用量页再回来,窗口与筛选保持上次选择。
+// 筛选偏好跟着应用走(模块级):离开统计页再回来,窗口与筛选保持上次选择。
 const windowDays = ref(1);
 const selectedSource = ref<SourceSelection>(ALL_SOURCES);
 const selectedModel = ref(ALL_MODELS);
 
-// 用量页只有一份全量日序列:窗口切换、来源与模型筛选都是纯前端裁剪,
+// 统计页只有一份全量日序列:窗口切换、来源与模型筛选都是纯前端裁剪,
 // 只有首次加载与手动刷新会调后端。stats 随页面挂载重拉。
 export function useUsageState() {
   const stats = ref<UsageStats | null>(null);

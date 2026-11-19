@@ -12,42 +12,42 @@
   flex-direction: column;
   width: 100%;
   min-height: 0;
-  overflow: auto;
   background: var(--color-canvas);
 }
 
 .providers-content__header {
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 18px;
-  /* 顶部留白由自身 padding 提供：吸顶时条带背景盖住顶端，
-     若用 sticky top 留缝，滚动内容会从缝隙里穿出来。 */
+  /* 页头在滚动流之外(下方 body 才是滚动容器),不需要 sticky;
+     背景由 .providers-content 提供,这里保持透明即可 */
+  flex: 0 0 auto;
   padding: 14px 16px 12px;
-  /* 背景必须不透明：内容从半透明底色下滚过会透出来。 */
-  background: var(--color-canvas);
   border-bottom: 1px solid var(--color-hairline);
 }
 
+/* 滚动条只属于页头下方的内容区:轨道从分隔线下面开始,不从窗口顶划到头 */
+.providers-content__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* 页签为文字下划线式:选中态的 2px 主色下划线压在 header 分隔线上融为一体。
+   负 margin 抵消 header 的 12px 底 padding,再多 1px 把 1px 分隔线盖住;
+   header padding-bottom 改动时这里的 13px 要跟着改。 */
 .providers-nav {
   display: flex;
   flex: 0 0 auto;
   flex-direction: row;
-  gap: 8px;
+  gap: 24px;
+  margin-bottom: -13px;
 }
 
 .providers-nav__button {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  min-height: var(--tab-height);
-  padding: 0 12px;
-  border: 1px solid var(--color-hairline);
-  border-radius: var(--radius-button);
-  background: var(--color-surface-soft, rgba(255, 255, 255, 0.9));
+  padding: 0 2px 13px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
   color: var(--color-body);
   font-size: var(--button-font-size);
   font-weight: var(--button-font-weight);
@@ -56,18 +56,19 @@
 
 @media (hover: hover) {
   .providers-nav__button:hover {
-    border-color: var(--color-muted-soft);
     color: var(--color-ink);
-    background: var(--color-surface-soft);
   }
 }
 
-/* 页签选中态与左栏一致:淡蓝 tint,不再用实心蓝盖满 */
 .providers-nav__button.is-active {
-  border-color: var(--color-primary-line);
-  background: var(--color-primary-tint);
-  color: var(--color-primary);
+  border-bottom-color: var(--color-primary);
+  color: var(--color-ink);
   font-weight: 600;
+}
+
+.providers-nav__button:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: -2px;
 }
 
 .providers-panel {

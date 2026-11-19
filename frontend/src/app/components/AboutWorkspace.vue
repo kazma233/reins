@@ -7,8 +7,8 @@ import ConfirmDialog from "@shared/ui/ConfirmDialog.vue";
 import { clearSessionCaches } from "../../features/sessions/api";
 import "./about-workspace.css";
 
-// 关于页是左栏的顶层页(与配置与分发/模型配置/历史会话平级),页面内不放返回:
-// 换页由左栏承担,和用量统计那种"从会话列表钻进去的子页"不同。
+// 关于页是左栏的顶层页(与配置与分发/模型配置/历史会话/会话统计平级),页面内
+// 不放返回:换页由左栏承担,不是从别处钻进去的子页。
 // 版本只有一个来源:Go 侧 AppInfoService 常量(与 build/config.yml 的
 // info.version 同步维护),不在这里另存常量。
 const version = ref<string | null>(null);
@@ -25,7 +25,7 @@ onMounted(async () => {
 const toolNames = AGENT_IDS.map((id) => AGENT_LABELS[id] ?? id).join(" / ");
 
 // 强制清空会话缓存:连持久层(目录行、摘要、用量)一起清,是怀疑缓存本身
-// 时的逃生通道。代价是下次加载全量重建,大库要等一会——列表与用量页的
+// 时的逃生通道。代价是下次加载全量重建,大库要等一会——列表与会话统计页的
 // 加载耗时指示正好能看到进度。
 const clearDialogOpen = ref(false);
 const clearing = ref(false);
@@ -77,7 +77,7 @@ async function clearCaches() {
 
       <section class="about-cache">
         <p class="about-cache__hint">
-          会话列表与用量统计依赖本地缓存加速。怀疑缓存结果不对时可以强制清空:
+          会话列表与会话统计依赖本地缓存加速。怀疑缓存结果不对时可以强制清空:
           下次加载会全量重建,转录多的话需要等待一段时间。
         </p>
         <button
