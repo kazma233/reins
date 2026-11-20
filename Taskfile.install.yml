@@ -1,0 +1,91 @@
+version: '3'
+
+# 本仓库自己的「安装到本机」任务：package 产物 + 各平台桌面集成，经根
+# Taskfile flatten include 并入主命名空间（task install / task uninstall）。
+# 与 wails 生成的平台任务（build/*/Taskfile.yml）分开，避免混进生成物。
+
+vars:
+  PRODUCT: "Reins"
+  COMPANY: "kazma"
+  # darwin 代码签名证书名（security find-identity -v -p codesigning 可列出）。
+  # macOS 15+ 的本地网络授权按签名身份追踪：聚合提供商可能是局域网内的
+  # 本地服务，连它就会触发授权弹窗，而 package 产出的 ad-hoc 签名每次重编
+  # 身份都变、授权随即失效。设为钥匙串里的证书名后，install 会用它重签
+  # 安装副本，授权得以保留。留空则保留 ad-hoc 签名。
+  SIGN_IDENTITY: ""
+  # windows NSIS 安装作用域，须与 build/windows 打包时传的一致（默认 machine）
+  INSTALL_SCOPE: '{{.INSTALL_SCOPE | default "machine"}}'
+
+tasks:
+  install:
+    desc: package 后把 bin 下的应用安装到本机当前用户
+    cmds:
+      - task: package
+      - task: install-{{OS}}
+
+  uninstall:
+    desc: 卸载当前用户的本机安装
+    cmds:
+      - task: uninstall-{{OS}}
+
+  # ----- macOS：bin/reins.app 原位装入 ~/Applications，Launchpad/Spotlight 即识别 -----
+  install-darwin:
+    platforms: [darwin]
+    preconditions:
+      - sh: test -d "{{.BIN_DIR}}/{{.APP_NAME}}.app"
+        msg: "{{.BIN_DIR}}/{{.APP_NAME}}.app 不存在，请先运行 task package。"
+    cmds:
+      - |
+        set -e
+        app="$HOME/Applications/{{.APP_NAME}}.app"
+        rm -rf -- "$app"
+        cp -R "{{.BIN_DIR}}/{{.APP_NAME}}.app" "$app"
+        if [ -n "{{.SIGN_IDENTITY}}" ]; then
+          codesign --force --sign "{{.SIGN_IDENTITY}}" "$app"
+          codesign --verify --strict "$app"
+        fi
+        echo "installed {{.PRODUCT}} -> $app"
+
+  uninstall-darwin:
+    platforms: [darwin]
+    cmds:
+      - rm -rf -- "$HOME/Applications/{{.APP_NAME}}.app"
+
+  # ----- Linux：XDG 用户目录，与 nfpm 的系统级打包同一套资产，无需 root -----
+  install-linux:
+    platforms: [linux]
+    preconditions:
+      - sh: test -x "{{.BIN_DIR}}/{{.APP_NAME}}"
+        msg: "{{.BIN_DIR}}/{{.APP_NAME}} 不存在，请先运行 task package。"
+      - sh: test -f "build/linux/{{.APP_NAME}}.desktop"
+        msg: "build/linux/{{.APP_NAME}}.desktop 不存在，请先运行 task package。"
+    cmds:
+      # .desktop 的 Exec 改写成绝对路径：不依赖 ~/.local/bin 在 PATH 上。
+      - install -Dm755 "{{.BIN_DIR}}/{{.APP_NAME}}" "$HOME/.local/bin/{{.APP_NAME}}"
+      - install -Dm644 "build/linux/icon.png" "$HOME/.local/share/icons/hicolor/128x128/apps/{{.APP_NAME}}.png"
+      - sed "s|^Exec=.*|Exec=$HOME/.local/bin/{{.APP_NAME}}|" "build/linux/{{.APP_NAME}}.desktop" > "$HOME/.local/share/applications/{{.APP_NAME}}.desktop"
+      - command -v update-desktop-database >/dev/null && update-desktop-database "$HOME/.local/share/applications" || true
+      - command -v gtk-update-icon-cache >/dev/null && gtk-update-icon-cache -f -t "$HOME/.local/share/icons/hicolor" || true
+      - echo "installed {{.PRODUCT}} -> $HOME/.local"
+
+  uninstall-linux:
+    platforms: [linux]
+    cmds:
+      - rm -f "$HOME/.local/bin/{{.APP_NAME}}"
+      - rm -f "$HOME/.local/share/icons/hicolor/128x128/apps/{{.APP_NAME}}.png"
+      - rm -f "$HOME/.local/share/applications/{{.APP_NAME}}.desktop"
+      - command -v update-desktop-database >/dev/null && update-desktop-database "$HOME/.local/share/applications" || true
+
+  # ----- Windows：静默运行 bin 下的 NSIS 安装器，卸载走 NSIS 自己的卸载器 -----
+  # 安装目录随打包时的 INSTALL_SCOPE（见 build/windows/nsis/project.nsi 的
+  # InstallDir）：machine 在 %ProgramFiles%\kazma\Reins，user 在
+  # %LOCALAPPDATA%\Programs\Reins；machine 级安装/卸载会请求 UAC。
+  install-windows:
+    platforms: [windows]
+    cmds:
+      - '{{.BIN_DIR}}\{{.APP_NAME}}-{{ARCH}}-installer.exe /S'
+
+  uninstall-windows:
+    platforms: [windows]
+    cmds:
+      - '{{if eq .INSTALL_SCOPE "user"}}%LOCALAPPDATA%\Programs\{{.PRODUCT}}\unins000.exe /S{{else}}%ProgramFiles%\{{.COMPANY}}\{{.PRODUCT}}\unins000.exe /S{{end}}'

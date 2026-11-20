@@ -15,6 +15,10 @@ includes:
   windows: ./build/windows/Taskfile.yml
   darwin: ./build/darwin/Taskfile.yml
   linux: ./build/linux/Taskfile.yml
+  # 本仓库自己的安装任务，flatten 并入主命名空间（task install / task uninstall）
+  install:
+    taskfile: ./Taskfile.install.yml
+    flatten: true
 
 tasks:
   build:
