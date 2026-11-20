@@ -52,6 +52,22 @@ const fetchDialogOpen = ref(false);
 const modelDialogOpen = ref(false);
 // 加入时被跳过的重名模型 ID，非空时弹窗提示。
 const skippedPromptIds = ref<string[]>([]);
+// 模型行展开状态按 rowKey 记：默认全部收起，点 header 才展开；模型多时
+// 目录保持一屏可扫。弹窗重开一并复位成收起。
+const expandedRowKeys = ref(new Set<string>());
+
+function isModelRowExpanded(rowKey: string): boolean {
+  return expandedRowKeys.value.has(rowKey);
+}
+
+function toggleModelRow(rowKey: string) {
+  const keys = expandedRowKeys.value;
+  if (keys.has(rowKey)) {
+    keys.delete(rowKey);
+  } else {
+    keys.add(rowKey);
+  }
+}
 
 // 新增 step 1 只展示服务商元数据；step 2（及编辑态）展示模型目录。
 const showMeta = computed(() => !props.creating || props.step === 1);
@@ -134,6 +150,7 @@ function resetTransient() {
   fetchDialogOpen.value = false;
   modelDialogOpen.value = false;
   skippedPromptIds.value = [];
+  expandedRowKeys.value = new Set();
 }
 
 // Key 可选：留空时面板只保存提供商元数据，同时清除已存 Key。
@@ -313,7 +330,21 @@ function applyModelsDevCompletion(meta: ModelsDevMeta) {
         class="providers-model-row"
       >
         <div class="providers-model-row__head">
-          <span class="providers-model-row__id">{{ row.id || "未命名模型" }}</span>
+          <!-- 折叠开关只占 ID 一侧：行内按钮是兄弟节点不吃 header 点击，键盘 Enter 也不会冒泡进来 -->
+          <span
+            class="providers-model-row__toggle"
+            role="button"
+            tabindex="0"
+            :aria-expanded="isModelRowExpanded(row.rowKey)"
+            @click="toggleModelRow(row.rowKey)"
+            @keydown.enter.prevent="toggleModelRow(row.rowKey)"
+            @keydown.space.prevent="toggleModelRow(row.rowKey)"
+          >
+            <span class="providers-model-row__chevron" aria-hidden="true">
+              {{ isModelRowExpanded(row.rowKey) ? "▾" : "▸" }}
+            </span>
+            <span class="providers-model-row__id">{{ row.id || "未命名模型" }}</span>
+          </span>
           <div class="providers-card__actions">
             <button
               class="secondary-button"
@@ -334,69 +365,71 @@ function applyModelsDevCompletion(meta: ModelsDevMeta) {
           </div>
         </div>
 
-        <div class="providers-form-grid">
-          <label class="providers-field">
-            <span>模型 ID</span>
-            <AppInput v-model="row.id" size="sm" :disabled="loading" />
-          </label>
-          <label class="providers-field">
-            <span>显示名</span>
-            <AppInput v-model="row.label" size="sm" :disabled="loading" />
-          </label>
-        </div>
-
-        <div
-          class="providers-model-row__grid"
-          style="grid-template-columns: repeat(2, minmax(0, 1fr))"
-        >
-          <label class="providers-field">
-            <span>上下文窗口</span>
-            <AppInput v-model.number="row.contextWindow" size="sm" type="number" :disabled="loading" />
-          </label>
-          <label class="providers-field">
-            <span>最大输出</span>
-            <AppInput v-model.number="row.maxOutputTokens" size="sm" type="number" :disabled="loading" />
-          </label>
-        </div>
-
-        <div
-          class="providers-model-row__grid"
-          style="grid-template-columns: auto auto minmax(0, 1fr)"
-        >
-          <div class="providers-field">
-            <span>图像输入</span>
-            <label class="providers-check">
-              <input
-                type="checkbox"
-                :checked="row.supportsImages === true"
-                :disabled="loading"
-                @change="
-                  row.supportsImages = ($event.target as HTMLInputElement).checked
-                    ? true
-                    : null
-                "
-              />
+        <template v-if="isModelRowExpanded(row.rowKey)">
+          <div class="providers-form-grid">
+            <label class="providers-field">
+              <span>模型 ID</span>
+              <AppInput v-model="row.id" size="sm" :disabled="loading" />
+            </label>
+            <label class="providers-field">
+              <span>显示名</span>
+              <AppInput v-model="row.label" size="sm" :disabled="loading" />
             </label>
           </div>
-          <div class="providers-field">
-            <span>推理能力</span>
-            <label class="providers-check">
-              <input
-                type="checkbox"
-                :checked="row.reasoning === true"
-                :disabled="loading"
-                @change="toggleReasoning(row, ($event.target as HTMLInputElement).checked)"
-              />
+
+          <div
+            class="providers-model-row__grid"
+            style="grid-template-columns: repeat(2, minmax(0, 1fr))"
+          >
+            <label class="providers-field">
+              <span>上下文窗口</span>
+              <AppInput v-model.number="row.contextWindow" size="sm" type="number" :disabled="loading" />
+            </label>
+            <label class="providers-field">
+              <span>最大输出</span>
+              <AppInput v-model.number="row.maxOutputTokens" size="sm" type="number" :disabled="loading" />
             </label>
           </div>
-          <div class="providers-field">
-            <span>思考等级</span>
-            <ReasoningLevelsSelect
-              v-model="row.reasoningLevels"
-              :disabled="loading || row.reasoning !== true"
-            />
+
+          <div
+            class="providers-model-row__grid"
+            style="grid-template-columns: auto auto minmax(0, 1fr)"
+          >
+            <div class="providers-field">
+              <span>图像输入</span>
+              <label class="providers-check">
+                <input
+                  type="checkbox"
+                  :checked="row.supportsImages === true"
+                  :disabled="loading"
+                  @change="
+                    row.supportsImages = ($event.target as HTMLInputElement).checked
+                      ? true
+                      : null
+                  "
+                />
+              </label>
+            </div>
+            <div class="providers-field">
+              <span>推理能力</span>
+              <label class="providers-check">
+                <input
+                  type="checkbox"
+                  :checked="row.reasoning === true"
+                  :disabled="loading"
+                  @change="toggleReasoning(row, ($event.target as HTMLInputElement).checked)"
+                />
+              </label>
+            </div>
+            <div class="providers-field">
+              <span>思考等级</span>
+              <ReasoningLevelsSelect
+                v-model="row.reasoningLevels"
+                :disabled="loading || row.reasoning !== true"
+              />
+            </div>
           </div>
-        </div>
+        </template>
 
       </div>
 

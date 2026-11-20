@@ -103,6 +103,7 @@
 /* 应用弹窗的弱边框提示块（不写入的模型元数据、档位说明等）：与普通说明
    区分，但不做成阻塞警告的视觉权重。 */
 .providers-unwritten-fields,
+.providers-sync-skips,
 .providers-apply-note {
   padding: 8px 10px;
   border: 1px solid var(--color-hairline);
@@ -337,6 +338,24 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+}
+
+/* 折叠开关吃掉 ID 到按钮之间的整段 header：命中区域就是可视盒子，不做隐藏热区 */
+.providers-model-row__toggle {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  cursor: pointer;
+  user-select: none;
+  border-radius: var(--radius-sm);
+}
+
+.providers-model-row__chevron {
+  flex: none;
+  color: var(--color-muted);
+  font-size: var(--font-size-sm);
 }
 
 .providers-model-row__id {
