@@ -12,18 +12,20 @@ import {
   formFromProvider,
   formToInput,
   hasApiKey,
+  initialSyncSelection,
   protocolLabel,
-  providerSyncPlan,
+  providerSyncApps,
+  providerSyncInput,
   emptyProviderForm,
   validateProviderForm,
   type ProviderFormState,
-  type ProviderSyncPlanItem,
-  type ProviderSyncSkip,
-  type ProviderSyncTarget,
+  type ProviderSyncApp,
 } from "../../model";
 import { useProvidersAction, type RunProvidersActionOptions } from "../../composables/useProvidersAction";
 import { ProviderWriteMode, type ProvidersState } from "@bindings/reins/internal/providers/models";
+import type { ProviderApp } from "@bindings/reins/internal/agents/models";
 import ProviderEditDialog from "../dialogs/ProviderEditDialog.vue";
+import ProviderSyncDialog from "../dialogs/ProviderSyncDialog.vue";
 
 type ProvidersPanelProps = {
   state: ProvidersState | null;
@@ -55,29 +57,35 @@ const deleteError = ref<string | null>(null);
 const syncResults = reactive<
   Record<string, { message: string; tone: "body" | "danger" }>
 >({});
+// 同步弹窗：点「同步」先勾选模型，确认后才逐工具应用。
+const syncDialog = reactive({ open: false, providerId: "" });
+const syncError = ref<string | null>(null);
 
-// 已应用 + 配置有偏差的条目都算同步目标，计划按提供商缓存一份供按钮与同步执行共用。
-const syncPlans = computed(() => {
-  const plans = new Map<string, ProviderSyncPlanItem[]>();
+// 每个提供商的同步候选与硬阻断：已应用/漂移条目的工具是候选，阻断只剩
+// 协议不兼容与未设 Key——模型取舍改由弹窗勾选表达。
+const syncAppsByProvider = computed(() => {
+  const map = new Map<string, ProviderSyncApp[]>();
   const current = state.value;
   if (current) {
     for (const provider of current.providers ?? []) {
-      plans.set(provider.id, providerSyncPlan(current, provider));
+      map.set(provider.id, providerSyncApps(current, provider));
     }
   }
-  return plans;
+  return map;
 });
 
-function syncPlanFor(providerId: string): ProviderSyncPlanItem[] {
-  return syncPlans.value.get(providerId) ?? [];
+function syncAppsFor(providerId: string): ProviderSyncApp[] {
+  return syncAppsByProvider.value.get(providerId) ?? [];
 }
 
-function syncTargetsFor(providerId: string): ProviderSyncTarget[] {
-  return syncPlanFor(providerId).filter((item): item is ProviderSyncTarget => !item.skip);
+function syncTargetsFor(providerId: string): ProviderApp[] {
+  return syncAppsFor(providerId)
+    .filter((item) => item.blockers.length === 0)
+    .map((item) => item.app);
 }
 
-function syncSkipsFor(providerId: string): ProviderSyncSkip[] {
-  return syncPlanFor(providerId).filter((item): item is ProviderSyncSkip => item.skip);
+function syncSkipsFor(providerId: string): ProviderSyncApp[] {
+  return syncAppsFor(providerId).filter((item) => item.blockers.length > 0);
 }
 
 // 阻断原因是完整句子，嵌入提示时去掉句尾句号再统一收尾。
@@ -85,18 +93,42 @@ function reasonText(reason: string): string {
   return reason.replace(/。+$/, "");
 }
 
+// 「未同步」清单条目：工具名（原因），弹窗与卡片常驻结果共用同一格式。
+function syncSkipLines(providerId: string): string[] {
+  return syncSkipsFor(providerId).map(
+    (item) => `${appLabel(item.app)}（${reasonText(item.blockers.join(""))}）`
+  );
+}
+
 function syncButtonTitle(providerId: string): string {
-  const plan = syncPlanFor(providerId);
-  if (plan.length === 0) {
+  const apps = syncAppsFor(providerId);
+  if (apps.length === 0) {
     return "尚未应用到任何 Agent。";
   }
   if (syncTargetsFor(providerId).length === 0) {
-    const reasons = syncSkipsFor(providerId)
-      .map((item) => `${appLabel(item.app)} ${reasonText(item.reason)}`)
-      .join("；");
-    return `无法同步：${reasons}。`;
+    return `无法同步：${syncSkipLines(providerId).join("；")}。`;
   }
   return "";
+}
+
+const syncProvider = computed(
+  () => (state.value?.providers ?? []).find((item) => item.id === syncDialog.providerId) ?? null
+);
+
+// 弹窗初始勾选：各参与工具已应用模型的并集，并集为空时给全目录。
+const syncInitialSelection = computed(() => {
+  const current = state.value;
+  const provider = syncProvider.value;
+  if (!current || !provider) {
+    return [];
+  }
+  return initialSyncSelection(current, provider, syncTargetsFor(provider.id));
+});
+
+function openSyncDialog(providerId: string) {
+  syncDialog.providerId = providerId;
+  syncError.value = null;
+  syncDialog.open = true;
 }
 
 function openCreate() {
@@ -168,47 +200,53 @@ function closeDeleteDialog() {
   deleteError.value = null;
 }
 
-// 同步是显式操作，点按即执行：逐个 Agent 应用，跳过与失败都汇总成一句
-// 常驻结果写回卡片；执行前先清掉该提供商的旧结果。
-function runSync(providerId: string) {
+// 同步是显式操作：按弹窗勾选逐个工具应用，后端按勾选清单整体重写条目
+// （未勾选即移除）；成功后关弹窗，跳过与失败汇总成一句常驻写回卡片。
+// 执行前先清掉该提供商的旧结果。
+function runSync(modelIds: string[]) {
+  const providerId = syncDialog.providerId;
+  const current = state.value;
+  const provider = syncProvider.value;
+  if (!current || !provider) {
+    return;
+  }
   const targets = syncTargetsFor(providerId);
-  const skips = syncSkipsFor(providerId);
+  const skipLines = syncSkipLines(providerId);
   delete syncResults[providerId];
   runProvidersAction({
     action: async () => {
       const synced: string[] = [];
       const failures: string[] = [];
-      for (const item of targets) {
+      for (const app of targets) {
         try {
-          await applyProviderToApp(item.input);
-          synced.push(appLabel(item.app));
+          await applyProviderToApp(providerSyncInput(current, provider, app, modelIds));
+          synced.push(appLabel(app));
         } catch (error) {
-          failures.push(`${appLabel(item.app)}：${extractErrorMessage(error, "同步失败。")}`);
+          failures.push(`${appLabel(app)}：${extractErrorMessage(error, "同步失败。")}`);
         }
       }
       return { synced, failures };
     },
     reload: true,
     onSuccess: ({ synced, failures }) => {
+      syncDialog.open = false;
       syncResults[providerId] = {
-        message: syncResultText(synced, failures, skips),
+        message: syncResultText(synced, failures, skipLines),
         tone: failures.length > 0 ? "danger" : "body",
       };
     },
     onError: (message) => {
-      syncResults[providerId] = { message, tone: "danger" };
+      // 失败留在弹窗里：勾选与说明原样保留，补齐前提后可原样重试。
+      syncError.value = message;
     },
   });
 }
 
 // 同步结果句：已同步 / 跳过原因 / 逐项失败明细合成一句，常驻在卡片上。
-function syncResultText(synced: string[], failures: string[], skips: ProviderSyncSkip[]): string {
+function syncResultText(synced: string[], failures: string[], skipLines: string[]): string {
   const parts = [synced.length > 0 ? `已同步到 ${synced.join("、")}` : "没有可同步的 Agent"];
-  if (skips.length > 0) {
-    const skipped = skips
-      .map((item) => `${appLabel(item.app)}（${reasonText(item.reason)}）`)
-      .join("、");
-    parts.push(`未同步：${skipped}`);
+  if (skipLines.length > 0) {
+    parts.push(`未同步：${skipLines.join("；")}`);
   }
   if (failures.length > 0) {
     parts.push(`失败：${failures.join("；")}`);
@@ -295,7 +333,7 @@ function confirmDeleteProvider() {
             :disabled="runningAction || syncTargetsFor(provider.id).length === 0"
             type="button"
             :title="syncButtonTitle(provider.id)"
-            @click="runSync(provider.id)"
+            @click="openSyncDialog(provider.id)"
           >
             同步
           </button>
@@ -322,6 +360,20 @@ function confirmDeleteProvider() {
       :step="editStep"
       @close="editOpen = false"
       @confirm="confirmEdit"
+    />
+
+    <!-- 打开时才挂载：open 与 providerId 同一次更新里置位，弹窗用 immediate 初始化 -->
+    <ProviderSyncDialog
+      v-if="syncProvider"
+      :open="syncDialog.open"
+      :loading="runningAction"
+      :provider="syncProvider"
+      :target-apps="syncTargetsFor(syncDialog.providerId)"
+      :skip-lines="syncSkipLines(syncDialog.providerId)"
+      :initial-selected-ids="syncInitialSelection"
+      :error="syncError"
+      @close="syncDialog.open = false"
+      @confirm="runSync"
     />
 
     <ConfirmDialog

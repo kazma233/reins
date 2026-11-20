@@ -165,6 +165,11 @@ export function unwrittenModelFieldsText(
   return `${appLabel(appState.app)} 不会写入这些模型元数据：${appState.unwrittenModelFields!.join("、")}；在模型里填写的对应值不会应用到该工具。`;
 }
 
+// Codex 的模型目录由已运行的进程缓存（0.159 起为托管守护进程），写入后
+// 不会自动生效；应用与同步两处弹窗共用这段提示，不各留一份文案。
+export const CODEX_RESTART_HINT =
+  "已运行的 Codex 不会自动读取本次变更：请完全退出 Codex 后重开；仍未生效时执行 codex app-server daemon restart（Codex 0.159 起模型目录由后台守护进程缓存）。";
+
 // 勾选语义两处模型表单共用：选中且未填等级时给常用默认集，
 // 取消时连同思考等级一并清空（应用时不写该元数据）。
 export function toggleReasoning(
@@ -183,11 +188,11 @@ export function toggleReasoning(
   }
 }
 
-// 应用前置条件清单；非空时应用按钮禁用并逐条展示原因。
-export function applyBlockers(
+// 应用前置条件：协议兼容 + 已设 Key，与模型勾选无关；同步候选的硬阻断
+// 只取这一层。
+export function applyPrerequisites(
   appState: ProviderAppState,
-  provider: ProviderView,
-  selectedModelIds: string[]
+  provider: ProviderView
 ): string[] {
   const blockers: string[] = [];
   if (!protocolCompatible(appState, provider)) {
@@ -198,6 +203,16 @@ export function applyBlockers(
   if (!hasApiKey(provider)) {
     blockers.push("尚未设置该提供商的 API Key。");
   }
+  return blockers;
+}
+
+// 应用前置条件清单 + 至少一个模型；非空时应用按钮禁用并逐条展示原因。
+export function applyBlockers(
+  appState: ProviderAppState,
+  provider: ProviderView,
+  selectedModelIds: string[]
+): string[] {
+  const blockers = applyPrerequisites(appState, provider);
   if (selectedModelIds.length === 0) {
     blockers.push("至少选择一个模型。");
   }
@@ -387,67 +402,77 @@ export function initialApplySelection(
   return { modelIds, defaultModelId, defaultReasoningLevel };
 }
 
-// 提供商同步计划：已应用与配置有偏差的条目都属于该提供商，逐个 Agent 生成
-// 应用输入；无法安全同步的 Agent 返回跳过原因，由调用方在确认弹窗展示。
-export type ProviderSyncTarget = { app: ProviderApp; skip: false; input: ApplyProviderInput };
-export type ProviderSyncSkip = { app: ProviderApp; skip: true; reason: string };
-export type ProviderSyncPlanItem = ProviderSyncTarget | ProviderSyncSkip;
+// ---------------------------------------------------------------------------
+// 提供商同步（卡片「同步」→ 勾选模型弹窗 → 逐工具应用）
+// ---------------------------------------------------------------------------
 
-export function providerSyncPlan(
+// 同步候选与硬阻断：已应用与配置有偏差的条目都属于该提供商，外部配置不
+// 算。阻断只取与模型勾选无关的前置条件（协议不兼容、未设 Key）；模型层
+// 面的取舍由同步弹窗的勾选表达，不再由计划代答。
+export type ProviderSyncApp = {
+  app: ProviderApp;
+  // 非空 = 该工具本次不参与同步，逐条给出原因。
+  blockers: string[];
+};
+
+export function providerSyncApps(
   state: ProvidersState,
   provider: ProviderView
-): ProviderSyncPlanItem[] {
-  const plan: ProviderSyncPlanItem[] = [];
+): ProviderSyncApp[] {
+  const apps: ProviderSyncApp[] = [];
   for (const appState of state.apps ?? []) {
-    const applied = entriesForProvider(appState, provider.id);
-    if (applied.length === 0) {
+    if (entriesForProvider(appState, provider.id).length === 0) {
       continue;
     }
-    // 已应用的模型全部不在目录中时 initialApplySelection 会回退成整个目录，
-    // 自动同步不替用户扩大选择，直接跳过。
-    const appliedModelIds = applied.flatMap((entry) => entry.modelIds ?? []);
-    const knownModelIds = appliedModelIds.filter((modelId) =>
-      (provider.models ?? []).some((model) => model.id === modelId)
-    );
-    if (appliedModelIds.length > 0 && knownModelIds.length === 0) {
-      plan.push({
-        app: appState.app,
-        skip: true,
-        reason: "已应用的模型均不在当前目录中。",
-      });
-      continue;
-    }
-
-    const selection = initialApplySelection(appState, provider);
-    const blockers = applyBlockers(appState, provider, selection.modelIds);
-    if (blockers.length > 0) {
-      plan.push({ app: appState.app, skip: true, reason: blockers.join("") });
-      continue;
-    }
-    // 与应用弹窗一致：默认思考等级取交集，当前写入值保留在可选项里。
-    const levels = reasoningLevelChoices(
-      appState,
-      provider,
-      selection.modelIds,
-      selection.defaultReasoningLevel
-    );
-    const defaultReasoningLevel =
-      selection.defaultReasoningLevel && levels.includes(selection.defaultReasoningLevel)
-        ? selection.defaultReasoningLevel
-        : null;
-    plan.push({
-      app: appState.app,
-      skip: false,
-      input: {
-        providerId: provider.id,
-        app: appState.app,
-        modelIds: selection.modelIds,
-        defaultModelId: selection.defaultModelId,
-        defaultReasoningLevel,
-      },
-    });
+    apps.push({ app: appState.app, blockers: applyPrerequisites(appState, provider) });
   }
-  return plan;
+  return apps;
+}
+
+// 同步弹窗的初始勾选：各参与工具已应用模型的并集与当前目录取交集；
+// 并集为空（条目漂移、已应用模型全部下架）时预选整个目录。
+export function initialSyncSelection(
+  state: ProvidersState,
+  provider: ProviderView,
+  apps: readonly ProviderApp[]
+): string[] {
+  const catalog = provider.models ?? [];
+  const selected = new Set<string>();
+  for (const app of apps) {
+    const appState = findAppState(state, app);
+    for (const entry of appState ? entriesForProvider(appState, provider.id) : []) {
+      for (const modelId of entry.modelIds ?? []) {
+        if (catalog.some((model) => model.id === modelId)) {
+          selected.add(modelId);
+        }
+      }
+    }
+  }
+  return selected.size > 0 ? [...selected] : catalog.map((model) => model.id);
+}
+
+// 同步确认后的逐工具应用输入：模型清单取弹窗勾选（后端按清单整体重写
+// reins- 条目，未勾选即移除）；默认模型沿用该工具当前写入值，不在勾选内
+// 时顺延为勾选第一项；默认思考等级保持当前写入值——工具不再支持该档位
+// 时 initialApplySelection 已降级为 null，模型目录收窄不抹已写档位。
+export function providerSyncInput(
+  state: ProvidersState,
+  provider: ProviderView,
+  app: ProviderApp,
+  modelIds: string[]
+): ApplyProviderInput {
+  const appState = findAppState(state, app);
+  const current = initialApplySelection(appState, provider);
+  return {
+    providerId: provider.id,
+    app,
+    modelIds,
+    defaultModelId:
+      current.defaultModelId && modelIds.includes(current.defaultModelId)
+        ? current.defaultModelId
+        : (modelIds[0] ?? ""),
+    defaultReasoningLevel: current.defaultReasoningLevel,
+  };
 }
 
 // ---------------------------------------------------------------------------

@@ -22,11 +22,13 @@ import {
   entriesForProvider,
   hasModelId,
   initialApplySelection,
+  initialSyncSelection,
   mergeFetchedModels,
   normalizeProviderIdInput,
   protocolCompatible,
   protocolIncompatibleTip,
-  providerSyncPlan,
+  providerSyncApps,
+  providerSyncInput,
   reasoningEffortMappingText,
   reasoningEffortWrite,
   reasoningIntersectionNote,
@@ -565,7 +567,7 @@ describe("mergeFetchedModels", () => {
   });
 });
 
-describe("providerSyncPlan", () => {
+describe("provider sync", () => {
   function entry(providerId: string, overrides: Partial<ProviderAppEntry> = {}): ProviderAppEntry {
     return {
       key: `reins-${providerId}`,
@@ -585,102 +587,165 @@ describe("providerSyncPlan", () => {
     return { configPath: "providers.yaml", providers, apps };
   }
 
-  function model(id: string): ProviderModelView {
-    return { id, label: id };
+  function model(id: string, overrides: Partial<ProviderModelView> = {}): ProviderModelView {
+    return { id, label: id, ...overrides };
   }
 
-  it("plans applied and drifted entries and ignores external ones", () => {
-    const target = provider({ id: "glm", models: [model("glm-4.5")] });
-    const plan = providerSyncPlan(
-      stateOf(
-        [
-          appState({ app: ProviderApp.ProviderCodex, entries: [entry("glm")] }),
-          appState({ app: ProviderApp.ProviderClaude, entries: [entry("glm", { status: ProviderAppEntryStatus.EntryStatusDrifted })] }),
-          appState({
-            app: ProviderApp.ProviderOpencode,
-            entries: [
-              {
-                key: "someone-else",
-                status: ProviderAppEntryStatus.EntryStatusExternal,
-                providerId: null,
-                label: null,
-                baseUrl: null,
-                modelIds: [],
-                defaultModelId: null,
-                notes: [],
-              },
-            ],
-          }),
-        ],
-        [target]
-      ),
-      target
-    );
-    expect(plan.map((item) => item.app)).toEqual(["codex", "claude"]);
-    expect(plan.some((item) => item.skip)).toBe(false);
-  });
+  describe("providerSyncApps", () => {
+    it("plans applied and drifted entries and ignores external ones", () => {
+      const target = provider({ id: "glm", models: [model("glm-4.5")] });
+      const apps = providerSyncApps(
+        stateOf(
+          [
+            appState({ app: ProviderApp.ProviderCodex, entries: [entry("glm")] }),
+            appState({ app: ProviderApp.ProviderClaude, entries: [entry("glm", { status: ProviderAppEntryStatus.EntryStatusDrifted })] }),
+            appState({
+              app: ProviderApp.ProviderOpencode,
+              entries: [
+                {
+                  key: "someone-else",
+                  status: ProviderAppEntryStatus.EntryStatusExternal,
+                  providerId: null,
+                  label: null,
+                  baseUrl: null,
+                  modelIds: [],
+                  defaultModelId: null,
+                  notes: [],
+                },
+              ],
+            }),
+          ],
+          [target]
+        ),
+        target
+      );
+      expect(apps.map((item) => item.app)).toEqual(["codex", "claude"]);
+      expect(apps.every((item) => item.blockers.length === 0)).toBe(true);
+    });
 
-  it("keeps each agent's applied models, default model and reasoning level", () => {
-    const target = provider({ id: "glm", models: [model("glm-4.5"), model("glm-4.6")] });
-    const apps = [
-      appState({
-        supportedReasoningLevels: [ReasoningLevel.ReasoningLow, ReasoningLevel.ReasoningHigh],
-        defaultReasoningLevel: ReasoningLevel.ReasoningHigh,
-        entries: [entry("glm", { modelIds: ["glm-4.5"], defaultModelId: "glm-4.5" })],
-      }),
-    ];
-    const plan = providerSyncPlan(stateOf(apps, [target]), target);
-    expect(plan).toHaveLength(1);
-    const item = plan[0];
-    if (item.skip) {
-      throw new Error("expected a syncable item");
-    }
-    expect(item.input).toEqual({
-      providerId: "glm",
-      app: "codex",
-      modelIds: ["glm-4.5"],
-      defaultModelId: "glm-4.5",
-      defaultReasoningLevel: "high",
+    it("reports protocol and key blockers as hard stops without dropping the candidate", () => {
+      const target = provider({ id: "glm", apiKey: "", models: [model("glm-4.5")] });
+      const apps = [appState({ supportedProtocols: [ProviderProtocol.ProtocolAnthropicMessages], entries: [entry("glm")] })];
+      const result = providerSyncApps(stateOf(apps, [target]), target);
+      expect(result).toHaveLength(1);
+      const reasons = result[0].blockers.join("");
+      expect(reasons).toContain("不支持协议");
+      expect(reasons).toContain("API Key");
+    });
+
+    it("plans nothing for a provider that is not applied anywhere", () => {
+      const target = provider({ id: "glm", models: [model("glm-4.5")] });
+      expect(providerSyncApps(stateOf([appState()], [target]), target)).toEqual([]);
     });
   });
 
-  it("skips agents whose applied models all left the catalog", () => {
-    const target = provider({ id: "glm", models: [model("glm-4.6")] });
-    const apps = [appState({ entries: [entry("glm", { modelIds: ["glm-4.5"] })] })];
-    const plan = providerSyncPlan(stateOf(apps, [target]), target);
-    const item = plan[0];
-    if (!item.skip) {
-      throw new Error("expected a skipped item");
-    }
-    expect(item.reason).toContain("均不在当前目录中");
+  describe("initialSyncSelection", () => {
+    it("unions applied models across targets and drops ids out of the catalog", () => {
+      const target = provider({ id: "glm", models: [model("glm-4.5"), model("glm-4.6")] });
+      const apps = [
+        appState({ app: ProviderApp.ProviderCodex, entries: [entry("glm", { modelIds: ["glm-4.5", "glm-legacy"] })] }),
+        appState({ app: ProviderApp.ProviderClaude, entries: [entry("glm", { modelIds: ["glm-4.6"] })] }),
+      ];
+      expect(
+        initialSyncSelection(stateOf(apps, [target]), target, [
+          ProviderApp.ProviderCodex,
+          ProviderApp.ProviderClaude,
+        ])
+      ).toEqual(["glm-4.5", "glm-4.6"]);
+    });
+
+    it("falls back to the whole catalog when no applied model remains", () => {
+      const target = provider({ id: "glm", models: [model("glm-4.6")] });
+      const apps = [appState({ entries: [entry("glm", { modelIds: ["glm-legacy"] })] })];
+      expect(
+        initialSyncSelection(stateOf(apps, [target]), target, [ProviderApp.ProviderCodex])
+      ).toEqual(["glm-4.6"]);
+    });
   });
 
-  it("skips agents that cannot apply yet and reports the blockers", () => {
-    const target = provider({ id: "glm", apiKey: "", models: [model("glm-4.5")] });
-    const apps = [appState({ entries: [entry("glm")] })];
-    const plan = providerSyncPlan(stateOf(apps, [target]), target);
-    const item = plan[0];
-    if (!item.skip) {
-      throw new Error("expected a skipped item");
-    }
-    expect(item.reason).toContain("API Key");
-  });
+  describe("providerSyncInput", () => {
+    it("swaps the model list and falls the default model back to the first selected one", () => {
+      const target = provider({ id: "glm", models: [model("glm-4.5"), model("glm-4.6")] });
+      const apps = [
+        appState({
+          supportedReasoningLevels: [ReasoningLevel.ReasoningLow, ReasoningLevel.ReasoningHigh],
+          defaultReasoningLevel: ReasoningLevel.ReasoningHigh,
+          entries: [entry("glm", { modelIds: ["glm-4.5", "glm-4.6"], defaultModelId: "glm-4.5" })],
+        }),
+      ];
+      const input = providerSyncInput(stateOf(apps, [target]), target, ProviderApp.ProviderCodex, ["glm-4.6"]);
+      expect(input).toEqual({
+        providerId: "glm",
+        app: "codex",
+        modelIds: ["glm-4.6"],
+        defaultModelId: "glm-4.6",
+        defaultReasoningLevel: "high",
+      });
+    });
 
-  it("skips agents whose tool cannot speak the provider protocol", () => {
-    const target = provider({ id: "glm", models: [model("glm-4.5")] });
-    const apps = [appState({ supportedProtocols: [ProviderProtocol.ProtocolAnthropicMessages], entries: [entry("glm")] })];
-    const plan = providerSyncPlan(stateOf(apps, [target]), target);
-    const item = plan[0];
-    if (!item.skip) {
-      throw new Error("expected a skipped item");
-    }
-    expect(item.reason).toContain("不支持协议");
-  });
+    it("keeps the current default model and reasoning level when the selection contains them", () => {
+      const target = provider({ id: "glm", models: [model("glm-4.5"), model("glm-4.6")] });
+      const apps = [
+        appState({
+          supportedReasoningLevels: [ReasoningLevel.ReasoningLow, ReasoningLevel.ReasoningHigh],
+          defaultReasoningLevel: ReasoningLevel.ReasoningHigh,
+          entries: [entry("glm", { modelIds: ["glm-4.5", "glm-4.6"], defaultModelId: "glm-4.5" })],
+        }),
+      ];
+      const input = providerSyncInput(
+        stateOf(apps, [target]),
+        target,
+        ProviderApp.ProviderCodex,
+        ["glm-4.5", "glm-4.6"]
+      );
+      expect(input.defaultModelId).toBe("glm-4.5");
+      expect(input.defaultReasoningLevel).toBe("high");
+    });
 
-  it("plans nothing for a provider that is not applied anywhere", () => {
-    const target = provider({ id: "glm", models: [model("glm-4.5")] });
-    const plan = providerSyncPlan(stateOf([appState()], [target]), target);
-    expect(plan).toEqual([]);
+    it("keeps the written level even when the selected model declares a narrower set", () => {
+      const target = provider({
+        id: "glm",
+        models: [model("glm-4.5", { reasoningLevels: [ReasoningLevel.ReasoningLow] })],
+      });
+      const apps = [
+        appState({
+          supportedReasoningLevels: [ReasoningLevel.ReasoningLow, ReasoningLevel.ReasoningHigh],
+          defaultReasoningLevel: ReasoningLevel.ReasoningHigh,
+          entries: [entry("glm", { modelIds: ["glm-4.5"], defaultModelId: "glm-4.5" })],
+        }),
+      ];
+      // 与重新应用同一契约：目录收窄不把工具里已写入的档位静默抹掉。
+      const input = providerSyncInput(stateOf(apps, [target]), target, ProviderApp.ProviderCodex, ["glm-4.5"]);
+      expect(input.defaultReasoningLevel).toBe("high");
+      expect(input.defaultModelId).toBe("glm-4.5");
+    });
+
+    it("drops the current level when the tool no longer supports it", () => {
+      const target = provider({ id: "glm", models: [model("glm-4.5")] });
+      const apps = [
+        appState({
+          supportedReasoningLevels: [ReasoningLevel.ReasoningLow],
+          defaultReasoningLevel: ReasoningLevel.ReasoningHigh,
+          entries: [entry("glm", { modelIds: ["glm-4.5"], defaultModelId: "glm-4.5" })],
+        }),
+      ];
+      const input = providerSyncInput(stateOf(apps, [target]), target, ProviderApp.ProviderCodex, ["glm-4.5"]);
+      expect(input.defaultReasoningLevel).toBeNull();
+    });
+
+    it("keeps the current level for additive apps regardless of model levels", () => {
+      const target = provider({ id: "glm", models: [model("glm-4.5")] });
+      const apps = [
+        appState({
+          additive: true,
+          supportedReasoningLevels: [ReasoningLevel.ReasoningHigh],
+          defaultReasoningLevel: ReasoningLevel.ReasoningHigh,
+          entries: [entry("glm", { modelIds: ["glm-4.5"], defaultModelId: "glm-4.5" })],
+        }),
+      ];
+      const input = providerSyncInput(stateOf(apps, [target]), target, ProviderApp.ProviderCodex, ["glm-4.5"]);
+      expect(input.defaultReasoningLevel).toBe("high");
+    });
   });
 });
 
