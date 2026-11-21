@@ -462,7 +462,7 @@ func TestWriterConstraintDeclarations(t *testing.T) {
 // 格式判定（后缀化决策的新行为分区）
 // ---------------------------------------------------------------------------
 
-// 已拍板的行为变更（aidocs/decisions/2026-11-19-mcp-format-detection-by-extension.md）：
+// 已拍板的行为变更（docs/decisions/2026-11-19-mcp-format-detection-by-extension.md）：
 // 格式判定只按扩展名——奇形怪状后缀的既有文件（哪怕内容是合法 JSON/TOML）
 // 一律报错提示改名，不再做内容探测。这个错误路径此前在 Rust 测试里零覆盖，
 // 由本用例钉住。

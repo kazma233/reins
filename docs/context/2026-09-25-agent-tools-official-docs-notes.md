@@ -21,7 +21,7 @@
 1. **项目级 `.grok/config.toml` 只贡献 `[mcp_servers]`、`[plugins]`、`[permission]`**，其余段（models、tools、sandbox 等）必须在用户级 `~/.grok/config.toml`。（SR「TOML Values」节）
    - 对 Reins：workspace 往项目级只写 MCP 的做法与官方约束一致，是安全边界。
 2. **`[mcp_servers.<name>]` 完整参考**（SR）：stdio 用 `command`/`args`/`env`/`cwd`；HTTP 用 `url`/`headers`/`bearer_token_env_var`；公共项 `enabled`、`startup_timeout_sec`（默认 30）、`tool_timeout_sec`（默认 6000）、`tool_timeouts` map。字符串字段支持 `${VAR}` 展开，headers 还可用 `{{session_id}}`。
-   - 对 Reins：印证 `aidocs/context/2026-09-15-mcp-config-mapping.md` 的变量语义记录；`tool_timeout_sec` 默认值与整数秒约束可补充进映射文档。
+   - 对 Reins：印证 `docs/context/2026-09-15-mcp-config-mapping.md` 的变量语义记录；`tool_timeout_sec` 默认值与整数秒约束可补充进映射文档。
 3. **跨工具扫描开关默认全开**（SR 环境变量节）：`GROK_CLAUDE_SKILLS_ENABLED`、`GROK_CURSOR_SKILLS_ENABLED`、`GROK_CLAUDE_MCPS_ENABLED` 等。
    - 对 Reins：Grok 会自动吃 Claude/Cursor 的 skills 和 MCP 配置，skills 同步后 Grok 可能「额外」看到同一份内容，排障时注意来源叠加。
 4. 其他环境变量：`GROK_HOME`（默认 `~/.grok`）、`XAI_API_KEY`、`GROK_DEFAULT_MODEL`、`GROK_SANDBOX`、`GROK_SUBAGENTS` 等（SR）。

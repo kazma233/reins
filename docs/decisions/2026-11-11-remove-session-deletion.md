@@ -40,7 +40,7 @@
 ## 失效文档
 
 - `2026-10-12-delete-sidecar-deepening.md`（删除侧线收编）整体失效，移入
-  `aidocs/archive/`。
+  `docs/archive/`。
 - `2026-10-08-cargo-constraints.md` 的 `default-run` 节随 bin 移除删除。
 - 契约对照表删除 `get_delete_plan` / `delete_session` 两行与对应 DTO 行。
 - `GLOSSARY.md` 删除「删除计划（delete plan）」词条。

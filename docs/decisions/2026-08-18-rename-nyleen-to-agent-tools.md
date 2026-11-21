@@ -52,7 +52,7 @@
 ### 3. 保留的 nyleen 字样
 
 - `README.md` 第 70 行 `nyleen.yaml（历史命名）`——解释旧字段废弃，加「（历史命名）」说明
-- `aidocs/decisions/` 下历史决策文档——按归档原则保留原貌
+- `docs/decisions/` 下历史决策文档——按归档原则保留原貌
 
 ## 影响（破坏性）
 

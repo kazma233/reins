@@ -29,4 +29,4 @@
 
 - `cargo check` 通过；`cargo test` workspace 域全绿，含新增 `tests/workspace_config.rs` 9 个测试：单删/批删/未知 id/空批次/建 target 落盘、双线程并发读改写不丢更新（锁生效的直接证明）、`write_atomic` 无残留临时文件、首次加载 bootstrap 模板可解析。
 - `pnpm test`（vitest 9 绿）、`pnpm build`（vue-tsc + vite）通过——Tauri command 增加的 `State` 参数不影响前端调用契约。
-- 已知无关失败：18 个 session 域测试因 `TestEnvGuard` 在 Windows 上只重定向 `HOME` 而泄漏真实用户目录（见 `aidocs/context/2026-08-18-session-tests-windows-home-leak.md`），stash 前后失败集合一致，与本改动无关。
+- 已知无关失败：18 个 session 域测试因 `TestEnvGuard` 在 Windows 上只重定向 `HOME` 而泄漏真实用户目录（见 `docs/context/2026-08-18-session-tests-windows-home-leak.md`），stash 前后失败集合一致，与本改动无关。

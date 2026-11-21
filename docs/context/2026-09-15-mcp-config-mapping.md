@@ -105,5 +105,5 @@ HOME="$base/home" XDG_CONFIG_HOME="$base/home/.config" sh -c "cd '$base/proj' &&
 
 ## 相关
 
-- `aidocs/context/grokbuild-integration-analysis.md`：Grok Build 接入与 MCP 格式实现。
-- `aidocs/context/2026-09-09-target-config-paths.md`：各 target 的全局/项目配置路径与节点。
+- `docs/context/grokbuild-integration-analysis.md`：Grok Build 接入与 MCP 格式实现。
+- `docs/context/2026-09-09-target-config-paths.md`：各 target 的全局/项目配置路径与节点。

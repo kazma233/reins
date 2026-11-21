@@ -49,7 +49,7 @@
 
 ## 不要重开的依据
 
-`aidocs/archive/2026-08-18-session-tests-windows-home-leak.md` 在修复 Windows home 泄漏时已写下同一结论：
+`docs/archive/2026-08-18-session-tests-windows-home-leak.md` 在修复 Windows home 泄漏时已写下同一结论：
 
 > 注意 `env::set_var` 是进程级全局，测试间必须**继续持 `test_env_lock` 串行**。
 

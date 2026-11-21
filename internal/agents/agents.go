@@ -226,7 +226,7 @@ var AgentSpecs = []AgentSpec{
 			// 三个落点都相对配置 home：实测（2.1.285）设置 CLAUDE_CONFIG_DIR 后
 			// settings.json / .claude.json / projects / sessions 全在变量目录下，
 			// ~/.claude 只是该变量的缺省值
-			//（见 aidocs/decisions/2026-10-12-global-root-env-redirect.md）。
+			//（见 docs/decisions/2026-10-12-global-root-env-redirect.md）。
 			Root:          RootClaudeConfigDir,
 			SkillDir:      "skills",
 			McpConfigPath: ".claude.json",

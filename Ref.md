@@ -15,7 +15,7 @@ commit 与当时 latest tag。
 
 > 许可证纪律:一律只借知识(格式、schema、字段口径、行为语义),不复制代码。
 > 六个仓库都是宽松许可(Apache-2.0/MIT),没有 GPL 传染问题,但实现一律按
-> reins 自身技术栈重写;引用时带路径,结论沉淀到 `aidocs/`,不要把上游源码
+> reins 自身技术栈重写;引用时带路径,结论沉淀到 `docs/`,不要把上游源码
 > 片段搬进 `src/`。
 >
 > 证据纪律:契约优先级 = **已安装运行时的实际行为 > 对应发布 tag 的源码/文档 >
@@ -64,7 +64,7 @@ commit 与当时 latest tag。
 - **版本差异**:release 与仓库同步(二进制即由此构建);变化点集中在 crate
   划分与 `wire_api` 值域,升级时按上面路径复核。
 - **reins 接入**:reader `session/codex.rs`、adapter `providers/apps/codex.rs`、
-  契约 `aidocs/context/2026-09-25-providers-contract-verification.md`
+  契约 `docs/context/2026-09-25-providers-contract-verification.md`
   (补充三/五/六)。
 
 ### 2. earendil-works/pi ⭐（schema 与文档最自解释）
@@ -96,7 +96,7 @@ commit 与当时 latest tag。
 - **版本差异**:未见商业版说明(pi.dev 承担文档站与 share viewer);以已安装
   CLI 的 `--version` 与 schemas 为准。
 - **reins 接入**:reader `session/pi.rs`、adapter `providers/apps/pi.rs`、
-  探索记录 `aidocs/context/2026-09-05-pi-session-source-review.md`、
+  探索记录 `docs/context/2026-09-05-pi-session-source-review.md`、
   `2026-09-11-pi-data-storage-and-subagent-extension.md`。
 
 ### 3. xai-org/grok-build ⭐（用法文档随包发布）
@@ -138,8 +138,8 @@ commit 与当时 latest tag。
 - **版本差异**:同步仓库 vs 官方安装脚本产物,以 `grok --version` 实测为准;
   文档随包导出到 `~/.grok/docs/user-guide/`,可直接读本机版本对应的文档。
 - **reins 接入**:reader `session/grokbuild.rs`、adapter
-  `providers/apps/grokbuild.rs`、`aidocs/context/grokbuild-integration-analysis.md`、
-  `aidocs/decisions/2026-10-12-grokbuild-index-cache.md`。
+  `providers/apps/grokbuild.rs`、`docs/context/grokbuild-integration-analysis.md`、
+  `docs/decisions/2026-10-12-grokbuild-index-cache.md`。
 
 ### 4. deepseek-ai/deepseek-harness（dsh）
 
@@ -174,7 +174,7 @@ commit 与当时 latest tag。
 - **版本差异**:alpha、破坏性变更预警;格式版本号显式存在(读文件前先认
   `vN`),reins 的 reader 已按该结构实现。
 - **reins 接入**:reader `session/dsh.rs`、adapter `providers/apps/dsh.rs`、
-  `aidocs/context/2026-10-07-dsh-session-storage-exploration.md`。
+  `docs/context/2026-10-07-dsh-session-storage-exploration.md`。
 
 ### 5. anomalyco/opencode
 
@@ -266,8 +266,8 @@ commit 与当时 latest tag。
   `/Applications/ZCode.app/Contents/Resources/glm/zcode.cjs`)。
 - **reins 接入**:reader `session/zcode.rs`、adapter
   `providers/apps/zcode.rs`、契约
-  `aidocs/context/2026-09-25-providers-contract-verification.md` 补充(七)、
-  `aidocs/context/2026-09-29-zcode-session-storage-exploration.md`。
+  `docs/context/2026-09-25-providers-contract-verification.md` 补充(七)、
+  `docs/context/2026-09-29-zcode-session-storage-exploration.md`。
 
 ## 二、Claude Code:无官方源码
 
@@ -303,8 +303,8 @@ commit 与当时 latest tag。
 2. **查证路径**:会话/用量格式 → 存储模块与迁移文件;provider 配置 →
    schema 定义文件(zod/JSON Schema)与内置默认值目录;CLI 行为 →
    文档目录 + 对应实现。都能在本文各节找到入口。
-3. **结论要沉淀**:源码查证的结论写进 `aidocs/`(格式契约、字段口径),Ref.md
-   只维护「去哪查」,不重复字段表;字段级细节以 aidocs 与代码为准。
+3. **结论要沉淀**:源码查证的结论写进 `docs/`(格式契约、字段口径),Ref.md
+   只维护「去哪查」,不重复字段表;字段级细节以 docs 与代码为准。
 4. **反编译只作补充**:打包产物(bundle/二进制)用于核对「运行时与仓库是否有
    版本差」,不作为契约定义;契约定义必须在源码或实测中找到。
 5. **不抄代码**:语言与结构均不同;只借 schema 形状、字段口径、算法思路。

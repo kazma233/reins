@@ -134,7 +134,7 @@ Skill 和 MCP 路径有官方契约，可以开始实现。会话目录与恢复
 
 映射已有字段即可：stdio 的 command/args/env，远端 url/headers，enabled，毫秒到秒 timeout。此次不扩展 cwd、OAuth、bearer_token_env_var、工具级超时等管理表单；环境变量引用可通过现有 headers/env 表达。
 
-字段口径差异与后续改造方向（统一 MCP 配置动态映射到各 agent 字段）记录在 `aidocs/context/2026-09-15-mcp-config-mapping.md`。
+字段口径差异与后续改造方向（统一 MCP 配置动态映射到各 agent 字段）记录在 `docs/context/2026-09-15-mcp-config-mapping.md`。
 
 ### 4. 会话
 

@@ -5,7 +5,7 @@
 // 格式判定只按扩展名（.json → JSON、.toml → TOML、其余报错）：这是 Go 迁移
 // 的已拍板行为变更，取代 Rust detect_mcp_file_format 的两段式判定（先按内容
 // 试解析、后缀兜底）——文件该是什么格式是文件所有者的静态契约，不属于
-// Reins 该猜的范围，见 aidocs/decisions/2026-11-19-mcp-format-detection-by-extension.md。
+// Reins 该猜的范围，见 docs/decisions/2026-11-19-mcp-format-detection-by-extension.md。
 package workspace
 
 import (

@@ -382,7 +382,7 @@ func detectSupportedFormat(writer mcpFormatWriter, configPath string) (mcpConfig
 // .toml → TOML、其余报错）。这是 Go 迁移的已拍板行为变更，取代 Rust
 // detect_mcp_file_format 的两段式判定（文件存在且非空时先按 JSON5/TOML 试
 // 解析、否则按后缀推断）——格式归属文件所有者，不是 Reins 该猜的，不再做
-// 内容探测。见 aidocs/decisions/2026-11-19-mcp-format-detection-by-extension.md。
+// 内容探测。见 docs/decisions/2026-11-19-mcp-format-detection-by-extension.md。
 func detectMCPFileFormat(configPath string) (mcpConfigFileFormat, error) {
 	switch filePathExtension(configPath) {
 	case "json":
