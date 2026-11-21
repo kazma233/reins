@@ -83,9 +83,27 @@ tasks:
   install-windows:
     platforms: [windows]
     cmds:
-      - '{{.BIN_DIR}}\{{.APP_NAME}}-{{ARCH}}-installer.exe /S'
+      # Task 在 Windows 用内嵌 POSIX shell 执行：裸反斜杠会被当转义符吃掉，
+      # 路径须加引号并用正斜杠（CreateProcess 两者都接受）。
+      # machine 作用域的安装器要求提权，非提权进程直接 exec 只会得到
+      # "requires elevation"：经 PowerShell RunAs（ShellExecute）触发 UAC。
+      - >-
+        {{if eq .INSTALL_SCOPE "user"}}
+        "{{.BIN_DIR}}/{{.APP_NAME}}-{{ARCH}}-installer.exe" /S
+        {{else}}
+        powershell -NoProfile -Command "Start-Process -FilePath '{{.ROOT_DIR}}/{{.BIN_DIR}}/{{.APP_NAME}}-{{ARCH}}-installer.exe' -ArgumentList '/S' -Verb RunAs -Wait"
+        {{end}}
 
   uninstall-windows:
     platforms: [windows]
     cmds:
-      - '{{if eq .INSTALL_SCOPE "user"}}%LOCALAPPDATA%\Programs\{{.PRODUCT}}\unins000.exe /S{{else}}%ProgramFiles%\{{.COMPANY}}\{{.PRODUCT}}\unins000.exe /S{{end}}'
+      # 同上：引号 + 正斜杠；环境变量用 $VAR（%VAR% 是 cmd 语法，sh 不展开）。
+      # task 为 64 位进程，$ProgramFiles 即 NSIS 的 $PROGRAMFILES64 安装位置。
+      # machine 作用域的卸载器同样要求提权：$ProgramFiles 由 sh 展开后经
+      # PowerShell RunAs 触发 UAC（PS 单引号内不展开变量，不能依赖它）。
+      - >-
+        {{if eq .INSTALL_SCOPE "user"}}
+        "$LOCALAPPDATA/Programs/{{.PRODUCT}}/uninstall.exe" /S
+        {{else}}
+        powershell -NoProfile -Command "Start-Process -FilePath '$ProgramFiles/{{.COMPANY}}/{{.PRODUCT}}/uninstall.exe' -ArgumentList '/S' -Verb RunAs -Wait"
+        {{end}}

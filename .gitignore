@@ -28,6 +28,8 @@ dist-ssr
 .zcode
 # wails3 构建产物
 bin/
+# 打包中间产物（webview2bootstrapper 等）
+build/**/*.exe
 
 # go-task 任务缓存
 .task/
