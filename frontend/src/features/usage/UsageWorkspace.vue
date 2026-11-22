@@ -8,16 +8,13 @@ import UsageMetricsRow from "./components/UsageMetricsRow.vue";
 import UsageTrendChart from "./components/UsageTrendChart.vue";
 import { useUsageState } from "./composables/useUsageState";
 import {
-  ALL_SOURCES,
-  formatSourceAppName,
-  type SourceSelection
-} from "../sessions/source-app";
-import {
   ALL_MODELS,
+  ALL_SOURCES,
   USAGE_WINDOWS,
   buildDayAxis,
   buildHourAxis,
   computeMetrics,
+  formatSourceAppName,
   localTodayDay,
   modelFilteredSources,
   sourceColor,
@@ -27,6 +24,7 @@ import {
   windowSourceSummaries,
   windowSources,
   type NormalizedUsageSource,
+  type UsageSourceFilter,
   type UsageWindowDays
 } from "./model";
 import type { UsageSourceStats } from "./types";
@@ -123,7 +121,7 @@ watch(modelOptions, (options) => {
 // AppSelect 的 model 是字符串,这里桥接到类型化的选择值。
 const sourceSelectValue = computed<string>({
   get: () => selectedSource.value,
-  set: (next) => setSelectedSource(next as SourceSelection)
+  set: (next) => setSelectedSource(next as UsageSourceFilter)
 });
 
 const modelSelectValue = computed<string>({

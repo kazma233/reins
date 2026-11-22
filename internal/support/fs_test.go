@@ -61,7 +61,8 @@ func TestJoinManifestRelativeSegments(t *testing.T) {
 		{"/home/u", ".pi/agent", joinSegs("/home/u", ".pi", "agent")},
 		{"/home/u", "/.codex//config.toml", joinSegs("/home/u", ".codex", "config.toml")},
 		{"/home/u", "", "/home/u"},
-		{"/home/u/", ".codex", joinSegs("/home/u", ".codex")},
+		// base 已带分隔符时按原拼写直接拼（对齐 Rust PathBuf::push），不清洗。
+		{"/home/u/", ".codex", "/home/u/.codex"},
 	}
 	for _, c := range cases {
 		if got := JoinManifestRelative(c.base, c.relative); got != c.want {

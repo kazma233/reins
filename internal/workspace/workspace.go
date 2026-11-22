@@ -750,11 +750,12 @@ func normalizeSourceDescription(description *string) *string {
 }
 
 // validateProjectID：project id 是用户可见标识，也是复合地址 `project:agent`
-// 的前半段：含 `:` 会让地址不可拆（前后端都按第一个冒号切），含 `/` 会破坏
-// 前端按展示 label 分组。校验只有这一处，写入与解析两侧都调用。
+// 的前半段：含 `:` 会让地址不可拆（前后端都按第一个冒号切），含 `/`、`\` 会
+// 破坏前端按展示 label 分组、且 Windows 反斜杠路径混进来必然不是标识。
+// 校验只有这一处，写入与解析两侧都调用。
 func validateProjectID(value string) error {
-	if strings.Contains(value, ":") || strings.Contains(value, "/") {
-		return fmt.Errorf("project id 不能包含 `:` 或 `/`：%s", value)
+	if strings.ContainsAny(value, `:/\`) {
+		return fmt.Errorf("project id 不能包含 `:`、`/` 或 `\\`：%s", value)
 	}
 	return nil
 }

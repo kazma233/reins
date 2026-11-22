@@ -305,6 +305,41 @@ func TestAppReasoningLevelRoundTripsAndSurvivesProviderWrites(t *testing.T) {
 	}
 }
 
+// 存量 providers.yaml 可能没有 app_settings 键（旧版本写入或手工编辑）：
+// 解码侧要维持与 emptyDocument 相同的不变量——两个 map 恒非 nil，否则第一次
+// 写工具级设置就在 nil map 上 panic。
+func TestReasoningLevelOnLegacyFileWithoutAppSettingsKey(t *testing.T) {
+	dir := testsupport.TestDir(t, "providers-legacy-settings")
+	configPath := filepath.Join(dir, providersConfigName)
+	if err := os.WriteFile(configPath, []byte("version: 1\nproviders:\n  p1:\n    label: 平台一\n    protocol: openai_chat_completions\n    base_url: https://p1.test/v1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	store := NewProviderConfigStoreAt(dir)
+
+	settings, err := store.AppSettings()
+	if err != nil {
+		t.Fatalf("读取存量文件 app settings: %v", err)
+	}
+	if len(settings) != 0 {
+		t.Fatalf("缺 app_settings 键时应读到空：%v", settings)
+	}
+
+	if err := store.SetAppReasoningLevel(agents.ProviderOpencode, levelPtr(ReasoningMax)); err != nil {
+		t.Fatalf("存量文件上首次设置推理等级: %v", err)
+	}
+	settings, _ = store.AppSettings()
+	if level := settings[agents.ProviderOpencode].DefaultReasoningLevel; level == nil || *level != ReasoningMax {
+		t.Fatalf("设置应生效：%v", settings[agents.ProviderOpencode].DefaultReasoningLevel)
+	}
+	if err := store.SetAppReasoningLevel(agents.ProviderOpencode, nil); err != nil {
+		t.Fatalf("存量文件上清除推理等级: %v", err)
+	}
+	settings, _ = store.AppSettings()
+	if len(settings) != 0 {
+		t.Fatalf("清除后应为空：%v", settings)
+	}
+}
+
 // 生产构造落点守卫：providers.yaml 是明文 API Key 文件，reins 段是存储契约
 // （AGENTS.md「改名即换存储位置」）。迁移期 configDir 副本漂移曾漏掉该段
 // （落点变成 config_dir 根、升级后读不到既有配置），此测试钉住生产路径，

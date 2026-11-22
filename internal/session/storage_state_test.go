@@ -22,7 +22,7 @@ func TestCodexReadsCompressedRolloutAndFlagsIt(t *testing.T) {
 		fmt.Sprintf("rollout-2026-03-01T10-00-00-%s.jsonl.zst", codexColdID))
 	writeJSONLRaw(t, path, string(codexColdRolloutZst))
 
-	reader := NewReaderEngine[CodexSessionRow](CodexSpec{}, home, tempStore(t))
+	reader := engineAt(t, CodexSpec{}, home, tempStore(t))
 	summary, err := reader.ParseSummary(codexColdID)
 	if err != nil {
 		t.Fatalf("parse summary: %v", err)
@@ -57,7 +57,7 @@ func TestCodexListsArchivedRolloutsInTheSameList(t *testing.T) {
 	writeJSONLFile(t, filepath.Join(home, "archived_sessions",
 		fmt.Sprintf("rollout-2026-03-01T11-00-00-%s.jsonl", archivedID)), coldRolloutLines(archivedID))
 
-	reader := NewReaderEngine[CodexSessionRow](CodexSpec{}, home, tempStore(t))
+	reader := engineAt(t, CodexSpec{}, home, tempStore(t))
 	entries, err := reader.ListEntries()
 	if err != nil {
 		t.Fatalf("list entries: %v", err)
@@ -85,7 +85,7 @@ func TestCodexKeepsOneRowWhenPlainAndCompressedSiblingsCoexist(t *testing.T) {
 	writeJSONLFile(t, plain, coldRolloutLines(codexColdID))
 	writeJSONLRaw(t, plain+".zst", string(codexColdRolloutZst))
 
-	reader := NewReaderEngine[CodexSessionRow](CodexSpec{}, home, tempStore(t))
+	reader := engineAt(t, CodexSpec{}, home, tempStore(t))
 	entries, err := reader.ListEntries()
 	if err != nil {
 		t.Fatalf("list entries: %v", err)
@@ -110,7 +110,7 @@ func TestCodexKeepsReadingARolloutCompressedAfterTheCatalogWasBuilt(t *testing.T
 	plain := filepath.Join(dir, fmt.Sprintf("rollout-2026-03-01T13-00-00-%s.jsonl", codexColdID))
 	writeJSONLFile(t, plain, coldRolloutLines(codexColdID))
 
-	reader := NewReaderEngine[CodexSessionRow](CodexSpec{}, home, tempStore(t))
+	reader := engineAt(t, CodexSpec{}, home, tempStore(t))
 	before, err := reader.ParseSummary(codexColdID)
 	if err != nil {
 		t.Fatalf("parse summary before: %v", err)
@@ -154,7 +154,7 @@ func TestDshReadsV0TranscriptsWithoutVersionSegment(t *testing.T) {
 		`{"type": "user/message", "seq": 1, "time": 1791355600001, "surfaceOp": "append", "data": {"content": [{"type": "text", "text": "plain v0 question"}], "source": {"kind": "user"}, "role": "user", "id": "user-1"}}`,
 	))
 
-	reader := NewReaderEngine[DshFamilyRow](DshSpec{}, sessions, tempStore(t))
+	reader := engineAt(t, DshSpec{}, sessions, tempStore(t))
 	entries, err := reader.ListEntries()
 	if err != nil {
 		t.Fatalf("list entries: %v", err)
@@ -205,7 +205,7 @@ func TestDshFlagsArchivedSessionsFromWorkspaceRegistry(t *testing.T) {
 		fmt.Sprintf(`{"global": {"archivedSessionIds": [%q]}}`, archivedID),
 	))
 
-	reader := NewReaderEngine[DshFamilyRow](DshSpec{}, sessions, tempStore(t))
+	reader := engineAt(t, DshSpec{}, sessions, tempStore(t))
 	archivedSummary, err := reader.ParseSummary(archivedID)
 	if err != nil {
 		t.Fatalf("parse archived: %v", err)
@@ -248,7 +248,7 @@ func TestZcodeFlagsArchivedSessionsFromTimeArchived(t *testing.T) {
 	mustExec(t, db, "INSERT INTO session (id, parent_id, directory, title, time_created, time_updated, time_archived) VALUES ('standalone', NULL, '/tmp/root', 'Standalone task', 1000, 2000, NULL)")
 	db.Close()
 
-	reader := NewReaderEngine[ZcodeSessionRow](ZcodeSpec{}, dbPath, tempStore(t))
+	reader := engineAt(t, ZcodeSpec{}, dbPath, tempStore(t))
 	archived, err := reader.ParseSummary("root-archived")
 	if err != nil {
 		t.Fatalf("parse archived: %v", err)
@@ -276,7 +276,7 @@ func TestOpenCodeFlagsArchivedSessionsFromTimeArchived(t *testing.T) {
 	mustExec(t, db, "INSERT INTO session_v2 (id, project_id, parent_id, slug, directory, title, version, time_created, time_updated, time_archived) VALUES ('ses_standalone', 'project-1', NULL, 'ses_standalone', '/tmp/root', 'Standalone task', '1', 1744366400000, 1744366500000, NULL)")
 	db.Close()
 
-	reader := NewReaderEngine[OpenCodeSessionRow](OpenCodeSpec{}, root, tempStore(t))
+	reader := engineAt(t, OpenCodeSpec{}, root, tempStore(t))
 	archived, err := reader.ParseSummary("ses_archived_root")
 	if err != nil {
 		t.Fatalf("parse archived: %v", err)

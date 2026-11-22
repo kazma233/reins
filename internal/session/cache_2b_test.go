@@ -71,7 +71,7 @@ func TestCodexColdStartReadsTitleFromPersistentCache(t *testing.T) {
 
 	titles := func() []string {
 		t.Helper()
-		engine := NewReaderEngine[CodexSessionRow](CodexSpec{}, root, store)
+		engine := engineAt(t, CodexSpec{}, root, store)
 		entries, err := engine.ListEntries()
 		if err != nil {
 			t.Fatalf("list entries: %v", err)
@@ -107,7 +107,7 @@ func TestCodexChangedFileReparsesAndRefreshesCache(t *testing.T) {
 
 	titles := func() []string {
 		t.Helper()
-		engine := NewReaderEngine[CodexSessionRow](CodexSpec{}, root, store)
+		engine := engineAt(t, CodexSpec{}, root, store)
 		entries, err := engine.ListEntries()
 		if err != nil {
 			t.Fatalf("list entries: %v", err)
@@ -148,7 +148,7 @@ func TestClaudeColdStartReadsTitleFromPersistentCache(t *testing.T) {
 
 	titles := func() []string {
 		t.Helper()
-		engine := NewReaderEngine[ClaudeSessionRow](ClaudeSpec{}, root, store)
+		engine := engineAt(t, ClaudeSpec{}, root, store)
 		entries, err := engine.ListEntries()
 		if err != nil {
 			t.Fatalf("list entries: %v", err)

@@ -149,10 +149,10 @@ func TestDshDefaultsPresetAndPrefixRelaxation(t *testing.T) {
 	if preset == nil {
 		t.Fatal("缺少 dsh 预设")
 	}
-	if preset.SkillDir != joinPath(home, ".dsh/skills") {
+	if preset.SkillDir != filepath.Join(home, ".dsh/skills") {
 		t.Fatalf("preset skill_dir：%s", preset.SkillDir)
 	}
-	if preset.ConfigPath == nil || *preset.ConfigPath != joinPath(home, ".dsh/cordis.patch.yml") {
+	if preset.ConfigPath == nil || *preset.ConfigPath != filepath.Join(home, ".dsh/cordis.patch.yml") {
 		t.Fatalf("preset config_path：%+v", preset.ConfigPath)
 	}
 	if preset.MCPConfigPrefix != "" {
@@ -199,7 +199,7 @@ func TestDshProjectDefaultsAreSkillsOnly(t *testing.T) {
 	if dsh == nil {
 		t.Fatal("dsh 项目默认值应存在")
 	}
-	if dsh.SkillDir != filepath.Join(project, ".dsh", "skills") {
+	if dsh.SkillDir != joinPath(project, ".dsh/skills") {
 		t.Fatalf("skill_dir：%s", dsh.SkillDir)
 	}
 	if dsh.ConfigPath != nil {
@@ -233,7 +233,7 @@ func TestDshCreateTargetAcceptsConfigPathWithoutPrefix(t *testing.T) {
 	if target == nil {
 		t.Fatal("dsh target exists")
 	}
-	if target.ConfigPath == nil || *target.ConfigPath != filepath.Join(root, "dsh", "cordis.patch.yml") {
+	if target.ConfigPath == nil || *target.ConfigPath != joinPath(root, "dsh/cordis.patch.yml") {
 		t.Fatalf("config_path：%+v", target.ConfigPath)
 	}
 	if target.MCPConfigPrefix != "" {

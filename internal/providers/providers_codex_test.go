@@ -69,9 +69,11 @@ func TestCodexApplyWritesCatalogBeforeConfig(t *testing.T) {
 	}
 
 	// 指针值与目录文件的实际路径必须一致，否则「先写目录」也救不了。
+	// TOML 基本字符串里反斜杠是转义符，匹配用转义后的拼写。
 	configContent := renderDiff(t, configFile.Diff)
 	catalogContent := renderDiff(t, catalogFile.Diff)
-	if !strings.Contains(configContent, "model_catalog_json") || !strings.Contains(configContent, catalogFile.Path) {
+	catalogPointer := strings.ReplaceAll(catalogFile.Path, `\`, `\\`)
+	if !strings.Contains(configContent, "model_catalog_json") || !strings.Contains(configContent, catalogPointer) {
 		t.Fatalf("config.toml 的 model_catalog_json 应指向目录文件 %s：\n%s", catalogFile.Path, configContent)
 	}
 	// 目录文件是给 Codex 读的模型清单，不该反过来带指针。

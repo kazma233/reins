@@ -16,7 +16,7 @@ import (
 
 func TestUsageDayStoreLoadRoundTripAndMtimeGate(t *testing.T) {
 	tempHome := testsupport.TestDir(t, "usage-roundtrip")
-	testsupport.SetHome(t, tempHome)
+	homeGuard(t, tempHome)
 
 	buckets := map[string]UsageHourBucket{
 		"2026-09-04T09": {Usage: SessionTokenUsage{InputTokens: 10, OutputTokens: 5}},
@@ -118,7 +118,7 @@ func TestUsageDayBucketModelsShapeContract(t *testing.T) {
 
 func TestUsageDayClearAllInvalidatesEveryRow(t *testing.T) {
 	tempHome := testsupport.TestDir(t, "usage-clear")
-	testsupport.SetHome(t, tempHome)
+	homeGuard(t, tempHome)
 
 	UsageDayStore(SourceCodex, "/tmp/a.jsonl", 1, map[string]UsageHourBucket{"2026-09-04T09": {}})
 	UsageDayClearAll()
@@ -134,7 +134,7 @@ func TestUsageDayOpeningRemovesStaleVersionFiles(t *testing.T) {
 	if err := os.MkdirAll(cacheDir, 0o777); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	testsupport.SetHome(t, tempHome)
+	homeGuard(t, tempHome)
 
 	for _, name := range []string{
 		"usage-day-cache.db",
@@ -164,19 +164,19 @@ func TestUsageDayOpeningRemovesStaleVersionFiles(t *testing.T) {
 // 数据（Rust with_connection 的路径变化分支）。
 func TestUsageDayReopensWhenHomeChanges(t *testing.T) {
 	firstHome := testsupport.TestDir(t, "usage-home-a")
-	testsupport.SetHome(t, firstHome)
+	homeGuard(t, firstHome)
 	UsageDayStore(SourceCodex, "/tmp/switch.jsonl", 1, map[string]UsageHourBucket{
 		"2026-09-04T09": {Usage: SessionTokenUsage{InputTokens: 7}},
 	})
 
 	secondHome := testsupport.TestDir(t, "usage-home-b")
-	testsupport.SetHome(t, secondHome)
+	homeGuard(t, secondHome)
 	if _, ok := UsageDayLoad[map[string]UsageHourBucket](SourceCodex, "/tmp/switch.jsonl", 1); ok {
 		t.Fatal("new home must start with an empty cache")
 	}
 
 	// 切回第一个 HOME 又能读到第一份库（路径寻址而非连接复用的证据）。
-	testsupport.SetHome(t, firstHome)
+	homeGuard(t, firstHome)
 	loaded, ok := UsageDayLoad[map[string]UsageHourBucket](SourceCodex, "/tmp/switch.jsonl", 1)
 	if !ok {
 		t.Fatal("switching back should hit the first home's cache")

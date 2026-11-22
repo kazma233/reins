@@ -1,13 +1,12 @@
 import { ref } from "vue";
-import { ALL_SOURCES, type SourceSelection } from "../../sessions/source-app";
 import { getUsageStats } from "../api";
 import { extractErrorMessage } from "@shared/lib/errors";
 import type { UsageStats } from "../types";
-import { ALL_MODELS } from "../model";
+import { ALL_MODELS, ALL_SOURCES, type UsageSourceFilter } from "../model";
 
 // 筛选偏好跟着应用走(模块级):离开统计页再回来,窗口与筛选保持上次选择。
 const windowDays = ref(1);
-const selectedSource = ref<SourceSelection>(ALL_SOURCES);
+const selectedSource = ref<UsageSourceFilter>(ALL_SOURCES);
 const selectedModel = ref(ALL_MODELS);
 
 // 统计页只有一份全量日序列:窗口切换、来源与模型筛选都是纯前端裁剪,
@@ -34,7 +33,7 @@ export function useUsageState() {
   }
 
   // 模型候选按来源切分:换来源后旧模型在新来源下不成立,一并重置回全部。
-  function setSelectedSource(source: SourceSelection) {
+  function setSelectedSource(source: UsageSourceFilter) {
     selectedSource.value = source;
     selectedModel.value = ALL_MODELS;
   }

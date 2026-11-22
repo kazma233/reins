@@ -13,17 +13,20 @@ import (
 	"sync"
 	"testing"
 
+	"reins/internal/agents"
 	"reins/internal/support"
 )
 
-// toolHomeVars：会被路径解析读取的工具重定向变量。SetHome 统一清空，避免
-// 真实环境里的重定向漏进测试（断言 home 兜底路径时尤其致命）。
-var toolHomeVars = []string{
-	"GROK_HOME",
-	"PI_CODING_AGENT_DIR",
-	"CODEX_HOME",
-	"CLAUDE_CONFIG_DIR",
-	"DSH_HOME",
+// toolHomeVars：会被路径解析读取的工具重定向变量，从 agents 清单派生
+// （Redirects 的 EnvVar）。SetHome 统一清空，避免真实环境里的重定向漏进
+// 测试（断言 home 兜底路径时尤其致命）；清单加带重定向的工具时自动跟上，
+// 不另行登记变量表——手抄一份会在新工具接入时漏清。
+func toolHomeVars() []string {
+	vars := make([]string, 0)
+	for _, redirect := range agents.Redirects() {
+		vars = append(vars, redirect.EnvVar)
+	}
+	return vars
 }
 
 // TestDir 返回测试专用临时目录（reins-<prefix> 子目录便于排查），测试结束
@@ -65,7 +68,7 @@ type EnvGuard struct {
 func SetHome(t *testing.T, tempHome string) *EnvGuard {
 	t.Helper()
 	guard := &EnvGuard{t: t}
-	for _, name := range toolHomeVars {
+	for _, name := range toolHomeVars() {
 		guard.save(name)
 		mustUnsetenv(t, name)
 	}

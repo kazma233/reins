@@ -43,7 +43,7 @@ func TestSummaryCachePersistenceChildHelper(t *testing.T) {
 
 func TestSummaryCachePersistenceSurvivesProcessRestart(t *testing.T) {
 	tempHome := testsupport.TestDir(t, "summary-restart")
-	testsupport.SetHome(t, tempHome)
+	homeGuard(t, tempHome)
 
 	// 子进程继承本进程的环境变量（HOME / REINS_TEST_HOME 已指向临时目录）。
 	exe, err := os.Executable()
@@ -65,12 +65,14 @@ func TestSummaryCachePersistenceSurvivesProcessRestart(t *testing.T) {
 	}
 }
 
-// SummaryDbAtStoreDirMust：测试内打开生产路径库目录的便捷封装。
+// SummaryDbAtStoreDirMust：测试内打开生产路径库目录的便捷封装；收尾注册
+// Close（Windows 下连接须先于 t.TempDir 清理释放）。
 func SummaryDbAtStoreDirMust(t *testing.T) *SummaryDb {
 	t.Helper()
 	db, err := SummaryDbAtStoreDir()
 	if err != nil {
 		t.Fatalf("open summary db: %v", err)
 	}
+	t.Cleanup(func() { _ = db.Close() })
 	return db
 }

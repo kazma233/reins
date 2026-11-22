@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ALL_SOURCES } from "../../sessions/source-app";
-import { ALL_MODELS } from "../model";
+import { ALL_MODELS, ALL_SOURCES } from "../model";
 import { SourceApp } from "../types";
 import { useUsageState } from "./useUsageState";
 

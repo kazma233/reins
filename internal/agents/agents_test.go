@@ -1,4 +1,7 @@
-package agents
+// 外部测试包：本文件同时使用 testsupport 夹具，而 testsupport 依赖 agents
+// （SetHome 的清空清单从 Redirects 派生），内部测试包会构成导入环；点导入
+// 让正文保持对包内符号的直接引用。
+package agents_test
 
 import (
 	"fmt"
@@ -7,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	. "reins/internal/agents"
 	"reins/internal/support"
 	"reins/internal/testsupport"
 )
@@ -208,9 +212,11 @@ func TestGlobalRootResolveDefaultsToHome(t *testing.T) {
 	env := support.FromEnv(Redirects())
 
 	want := map[string]string{
-		"home":              home,
+		"home": home,
+		// pi 的默认目录是 ".pi/agent"：Resolve 以平台分隔符接 HOME、清单
+		// 拼写原样保留（对齐 Rust），不清洗内嵌的 /。
+		"pi_agent_dir":      home + string(filepath.Separator) + ".pi/agent",
 		"grok_home":         joinSegs(home, ".grok"),
-		"pi_agent_dir":      joinSegs(home, ".pi", "agent"),
 		"codex_home":        joinSegs(home, ".codex"),
 		"claude_config_dir": joinSegs(home, ".claude"),
 		"dsh_home":          joinSegs(home, ".dsh"),

@@ -17,7 +17,7 @@ func TestOpenCodeRootSessionAggregatesSubagentSessions(t *testing.T) {
 	childID := "ses_child_session"
 	seedOpenCodeFamilyAt(t, root, rootID, childID)
 
-	reader := NewReaderEngine[OpenCodeSessionRow](OpenCodeSpec{}, root, tempStore(t))
+	reader := engineAt(t, OpenCodeSpec{}, root, tempStore(t))
 	summary, err := reader.ParseSummary(rootID)
 	if err != nil {
 		t.Fatalf("parse summary: %v", err)
@@ -44,7 +44,7 @@ func TestOpenCodeOverviewCountsMatchLoadedTimeline(t *testing.T) {
 	root := t.TempDir()
 	seedOpenCodeFamilyAt(t, root, "ses_root_session", "ses_child_session")
 
-	reader := NewReaderEngine[OpenCodeSessionRow](OpenCodeSpec{}, root, tempStore(t))
+	reader := engineAt(t, OpenCodeSpec{}, root, tempStore(t))
 	overview, err := reader.ParseOverview("ses_root_session")
 	if err != nil {
 		t.Fatalf("parse overview: %v", err)
@@ -70,7 +70,7 @@ func TestCodexIgnoresAgentsBannerWhenPickingTitle(t *testing.T) {
 		`{"timestamp": "2026-04-21T12:00:02.000Z", "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "text", "text": "How do I list the current files?"}]}}`,
 	))
 
-	summary, err := NewReaderEngine[CodexSessionRow](CodexSpec{}, root, tempStore(t)).ParseSummary(sessionID)
+	summary, err := engineAt(t, CodexSpec{}, root, tempStore(t)).ParseSummary(sessionID)
 	if err != nil {
 		t.Fatalf("parse summary: %v", err)
 	}
@@ -93,7 +93,7 @@ func TestCodexSkipsAgentsInstructionsBlockWhenPickingTitle(t *testing.T) {
 		`{"timestamp": "2026-04-21T12:00:02.000Z", "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "text", "text": "帮我看一下这个报错"}]}}`,
 	))
 
-	summary, err := NewReaderEngine[CodexSessionRow](CodexSpec{}, root, tempStore(t)).ParseSummary(sessionID)
+	summary, err := engineAt(t, CodexSpec{}, root, tempStore(t)).ParseSummary(sessionID)
 	if err != nil {
 		t.Fatalf("parse summary: %v", err)
 	}
@@ -110,7 +110,7 @@ func TestClaudeIgnoresAgentsBannerWhenPickingTitle(t *testing.T) {
 		`{"type": "user", "message": {"content": "How do I list the current files?"}}`,
 	))
 
-	summary, err := NewReaderEngine[ClaudeSessionRow](ClaudeSpec{}, root, tempStore(t)).ParseSummary("session-123")
+	summary, err := engineAt(t, ClaudeSpec{}, root, tempStore(t)).ParseSummary("session-123")
 	if err != nil {
 		t.Fatalf("parse summary: %v", err)
 	}
@@ -127,7 +127,7 @@ func TestClaudeKeepsInjectedContextAsReadableBlock(t *testing.T) {
 		`{"type": "user", "message": {"content": "# AGENTS.md instructions for /tmp/reins/workspace\n<system-reminder>\nYour operational mode has changed from plan to build.\n</system-reminder>"}}`,
 	))
 
-	reader := NewReaderEngine[ClaudeSessionRow](ClaudeSpec{}, root, tempStore(t))
+	reader := engineAt(t, ClaudeSpec{}, root, tempStore(t))
 	detail := readDetailOf(t, reader, "session-context")
 	block, ok := firstBlockOfKind(detail.messages, "context_injection")
 	if !ok {
@@ -153,7 +153,7 @@ func TestClaudeTurnsImageBlocksIntoRenderableImageBlocks(t *testing.T) {
 		`{"type": "user", "message": {"content": [{"type": "text", "text": "看下这两张图"}, {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": "/9j/4AAQ"}}, {"type": "image", "source": {"type": "url", "url": "https://example.invalid/a.png"}}]}}`,
 	))
 
-	reader := NewReaderEngine[ClaudeSessionRow](ClaudeSpec{}, root, tempStore(t))
+	reader := engineAt(t, ClaudeSpec{}, root, tempStore(t))
 	detail := readDetailOf(t, reader, "session-image")
 	var references []string
 	for _, message := range detail.messages {
@@ -178,7 +178,7 @@ func TestClaudeRendersLocalCommandRecordsAsReadableBlocks(t *testing.T) {
 		`{"type": "user", "message": {"role": "user", "content": "<local-command-stdout>See ya!</local-command-stdout>"}}`,
 	))
 
-	reader := NewReaderEngine[ClaudeSessionRow](ClaudeSpec{}, root, tempStore(t))
+	reader := engineAt(t, ClaudeSpec{}, root, tempStore(t))
 	detail := readDetailOf(t, reader, "session-local-command")
 
 	type blockTuple struct {
@@ -227,7 +227,7 @@ func TestClaudeSkipsUnreadableFilesWhenIndexing(t *testing.T) {
 	))
 	writeJSONLRaw(t, invalidPath, "{ not valid json }\n")
 
-	reader := NewReaderEngine[ClaudeSessionRow](ClaudeSpec{}, root, tempStore(t))
+	reader := engineAt(t, ClaudeSpec{}, root, tempStore(t))
 	entries, err := reader.ListEntries()
 	if err != nil {
 		t.Fatalf("list entries: %v", err)
@@ -247,7 +247,7 @@ func TestClaudeExposesUnsupportedMessageContent(t *testing.T) {
 		`{"timestamp": "2026-04-21T12:00:00.000Z", "sessionId": "session-unsupported", "type": "assistant", "message": {"content": {"unexpected": true}}}`,
 	))
 
-	reader := NewReaderEngine[ClaudeSessionRow](ClaudeSpec{}, root, tempStore(t))
+	reader := engineAt(t, ClaudeSpec{}, root, tempStore(t))
 	detail := readDetailOf(t, reader, "session-unsupported")
 	block, ok := firstBlockOfKind(detail.messages, "unsupported_content")
 	if !ok {
@@ -270,7 +270,7 @@ func TestCodexTurnsInputImageIntoRenderableImageBlock(t *testing.T) {
 		`{"timestamp": "2026-04-21T12:00:02.000Z", "type": "response_item", "payload": {"type": "reasoning", "content": null, "encrypted_content": "SYNTHETIC_BLOB"}}`,
 	))
 
-	detail := readDetailOf(t, NewReaderEngine[CodexSessionRow](CodexSpec{}, root, tempStore(t)), sessionID)
+	detail := readDetailOf(t, engineAt(t, CodexSpec{}, root, tempStore(t)), sessionID)
 	block, ok := firstBlockOfKind(detail.messages, "image")
 	if !ok {
 		t.Fatal("image block missing")
@@ -318,7 +318,7 @@ func TestCodexKeepsInjectedContextAsReadableBlock(t *testing.T) {
 		`{"timestamp": "2026-04-21T12:00:01.000Z", "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "# AGENTS.md instructions for /tmp/reins/workspace\n\n<INSTRUCTIONS>\n使用中文回复。\n</INSTRUCTIONS>"}, {"type": "input_text", "text": "<environment_context>\n  <cwd>/tmp/reins/workspace</cwd>\n</environment_context>"}], "internal_chat_message_metadata_passthrough": {"content_item_kinds": ["agents_md.instructions", "environments.environment_context"]}}}`,
 	))
 
-	detail := readDetailOf(t, NewReaderEngine[CodexSessionRow](CodexSpec{}, root, tempStore(t)), sessionID)
+	detail := readDetailOf(t, engineAt(t, CodexSpec{}, root, tempStore(t)), sessionID)
 	block, ok := firstBlockOfKind(detail.messages, "context_injection")
 	if !ok {
 		t.Fatal("context injection block missing")
@@ -347,7 +347,7 @@ func TestCodexExposesUnsupportedMessageContentAndBlocks(t *testing.T) {
 		`{"timestamp": "2026-04-21T12:00:02.000Z", "type": "response_item", "payload": {"type": "message", "role": "assistant", "content": [{"type": "new_block_shape", "value": 42}]}}`,
 	))
 
-	detail := readDetailOf(t, NewReaderEngine[CodexSessionRow](CodexSpec{}, root, tempStore(t)), sessionID)
+	detail := readDetailOf(t, engineAt(t, CodexSpec{}, root, tempStore(t)), sessionID)
 	contentBlock, hasContent := firstBlockOfKind(detail.messages, "unsupported_content")
 	blockBlock, hasBlock := firstBlockOfKind(detail.messages, "unsupported_block")
 	if !hasContent || !strings.Contains(derefString(contentBlock.Text), "\"unexpected\": true") {
@@ -385,7 +385,7 @@ func TestOpenCodeExposesMessagesWithoutVisibleParts(t *testing.T) {
 		"msg-empty", sessionID, "assistant", 1, int64(1_744_366_400_000), int64(1_744_366_400_000),
 		`{"time": {"created": 1744366400000}, "agent": "build"}`)
 
-	detail := readDetailOf(t, NewReaderEngine[OpenCodeSessionRow](OpenCodeSpec{}, root, tempStore(t)), sessionID)
+	detail := readDetailOf(t, engineAt(t, OpenCodeSpec{}, root, tempStore(t)), sessionID)
 	block, ok := firstBlockOfKind(detail.messages, "empty_message")
 	if !ok {
 		t.Fatal("empty_message block missing")
@@ -433,7 +433,7 @@ func TestOpenCodeV2ParsesToolContentAndNonMessageEvents(t *testing.T) {
 		"msg-compaction", sessionID, "compaction", 3, compactionTime, compactionTime,
 		`{"status": "completed", "reason": "auto", "summary": "## 总结：v2 读取改造"}`)
 
-	detail := readDetailOf(t, NewReaderEngine[OpenCodeSessionRow](OpenCodeSpec{}, root, tempStore(t)), sessionID)
+	detail := readDetailOf(t, engineAt(t, OpenCodeSpec{}, root, tempStore(t)), sessionID)
 
 	// 消息时间线只有 user/assistant 行
 	if len(detail.messages) != 1 {
@@ -514,7 +514,7 @@ func TestClaudeRootSessionAggregatesSubagentSessions(t *testing.T) {
 	))
 	writeJSONLRaw(t, childMetaPath, `{"agentType":"Explore","description":"Find fetch_rss scheduling code"}`)
 
-	reader := NewReaderEngine[ClaudeSessionRow](ClaudeSpec{}, root, tempStore(t))
+	reader := engineAt(t, ClaudeSpec{}, root, tempStore(t))
 	entries, err := reader.ListEntries()
 	if err != nil {
 		t.Fatalf("list entries: %v", err)
@@ -674,7 +674,7 @@ func TestCodexResumeSegmentsKeepOriginalSegmentAsRoot(t *testing.T) {
 		`{"timestamp": "2026-09-02T09:32:04.000Z", "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "继续"}]}}`,
 	))
 
-	reader := NewReaderEngine[CodexSessionRow](CodexSpec{}, root, tempStore(t))
+	reader := engineAt(t, CodexSpec{}, root, tempStore(t))
 	entries, err := reader.ListEntries()
 	if err != nil {
 		t.Fatalf("list entries: %v", err)
@@ -707,7 +707,7 @@ func TestCodexTitleStripsMarkdownLinkSyntax(t *testing.T) {
 		`{"timestamp": "2026-09-02T08:00:16.000Z", "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "[$mongo-slow-log-report]($HOME/Desktop/skills/mongo-slow-log-report/SKILL.md) 帮我看下这份skill有没有问题"}]}}`,
 	))
 
-	entries, err := NewReaderEngine[CodexSessionRow](CodexSpec{}, root, tempStore(t)).ListEntries()
+	entries, err := engineAt(t, CodexSpec{}, root, tempStore(t)).ListEntries()
 	if err != nil {
 		t.Fatalf("list entries: %v", err)
 	}
@@ -740,7 +740,7 @@ func TestCodexModelsFollowProviderAndTurnContext(t *testing.T) {
 		`{"timestamp": "2026-05-01T09:00:06.000Z", "type": "response_item", "payload": {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "Second answer"}]}}`,
 	))
 
-	reader := NewReaderEngine[CodexSessionRow](CodexSpec{}, dir, tempStore(t))
+	reader := engineAt(t, CodexSpec{}, dir, tempStore(t))
 	summary, err := reader.ParseSummary(sessionID)
 	if err != nil {
 		t.Fatalf("parse summary: %v", err)
@@ -794,7 +794,7 @@ func TestOpenCodeModelsComeFromAssistantMessageData(t *testing.T) {
 	seedOpenCodeMessageRow(t, db, "ses_models_child", "child-msg-2", 1_744_366_403_000, 2, "assistant",
 		`{"time": {"created": 1744366403000}, "model": {"providerID": "platform-a", "id": "gpt-5.6-terra"}, "content": [{"type": "text", "text": "Child follow-up"}]}`)
 
-	reader := NewReaderEngine[OpenCodeSessionRow](OpenCodeSpec{}, root, tempStore(t))
+	reader := engineAt(t, OpenCodeSpec{}, root, tempStore(t))
 	summary, err := reader.ParseSummary(sessionID)
 	if err != nil {
 		t.Fatalf("parse summary: %v", err)

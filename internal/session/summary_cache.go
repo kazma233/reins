@@ -45,14 +45,23 @@ type SummaryDb struct {
 	db *sql.DB
 }
 
-// SummaryDbAtStoreDir：生产路径的库目录（`~/.reins`）。引擎与 pi 实例都从
-// 这里取，口径只有一处。
-func SummaryDbAtStoreDir() (*SummaryDb, error) {
+// reinsStoreDir：生产路径的持久缓存目录（`~/.reins`）的唯一解析点——引擎
+// 与 pi 实例的前置层、ClearAllCaches 都从这里取。
+func reinsStoreDir() (string, error) {
 	home, ok := support.UserHomeDir()
 	if !ok {
-		return nil, fmt.Errorf("Unable to determine home directory")
+		return "", fmt.Errorf("Unable to determine home directory")
 	}
-	return SummaryDbAt(filepath.Join(home, ".reins")), nil
+	return filepath.Join(home, ".reins"), nil
+}
+
+// SummaryDbAtStoreDir：生产路径的摘要库（目录经 reinsStoreDir 解析）。
+func SummaryDbAtStoreDir() (*SummaryDb, error) {
+	dir, err := reinsStoreDir()
+	if err != nil {
+		return nil, err
+	}
+	return SummaryDbAt(dir), nil
 }
 
 // SummaryDbAt 以显式目录构造（测试与引擎注入用）。

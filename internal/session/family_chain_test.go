@@ -163,7 +163,7 @@ func TestClaudeResolvesFamilyKeyToRootAndMemberIDToMember(t *testing.T) {
 		fmt.Sprintf(`{"timestamp": "2026-04-21T15:00:00.000Z", "sessionId": %q, "type": "user", "message": {"content": "Child task"}}`, rootID),
 	))
 
-	reader := NewReaderEngine[ClaudeSessionRow](ClaudeSpec{}, root, tempStore(t))
+	reader := engineAt(t, ClaudeSpec{}, root, tempStore(t))
 	rootSummary, err := reader.ParseSummary(rootID)
 	if err != nil {
 		t.Fatalf("parse root summary: %v", err)
@@ -197,7 +197,7 @@ func TestCodexResolvesFamilyKeyToRootAndMemberIDToMember(t *testing.T) {
 		fmt.Sprintf(`{"timestamp": "2026-04-21T15:00:00.000Z", "type": "session_meta", "payload": {"id": %q, "cwd": "/tmp/reins/workspace", "source": {"subagent": {"thread_spawn": {"parent_thread_id": %q}}}}}`, childID, rootID),
 	))
 
-	reader := NewReaderEngine[CodexSessionRow](CodexSpec{}, root, tempStore(t))
+	reader := engineAt(t, CodexSpec{}, root, tempStore(t))
 	rootSummary, err := reader.ParseSummary(rootID)
 	if err != nil {
 		t.Fatalf("parse root summary: %v", err)

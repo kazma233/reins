@@ -273,28 +273,11 @@ func SyncSourceToTargetsInner(store *WorkspaceConfigStore, input SourceSyncInput
 	if err != nil {
 		return nil, err
 	}
-	sourceDefinition, err := sourceDefinitionFromConfig(config, input.SourceID)
+
+	// 1. 同一输入的同一份解释：来源定义 → 弹窗快照/发现 → 勾选过滤。
+	sourceRoot, selectedSkills, err := syncSelection(store, config, &input)
 	if err != nil {
 		return nil, err
-	}
-
-	// 1. Reuse the dialog snapshot when present; it was already refreshed when
-	// the sync dialog opened, so confirmation should not fetch and scan again.
-	sourceRoot, discovered, err := sourceSyncSnapshot(store, sourceDefinition, &input)
-	if err != nil {
-		return nil, err
-	}
-
-	// 2. Build a set of selected skill relative paths.
-	selected := map[string]bool{}
-	for _, path := range input.SkillPaths {
-		selected[path] = true
-	}
-	selectedSkills := make([]DiscoveredSkill, 0)
-	for _, skill := range discovered {
-		if selected[skill.RelativePath] {
-			selectedSkills = append(selectedSkills, skill)
-		}
 	}
 
 	conflicts, err := sourceSyncConflicts(config, sourceRoot, selectedSkills, input.TargetIDs)
@@ -309,33 +292,16 @@ func SyncSourceToTargetsInner(store *WorkspaceConfigStore, input SourceSyncInput
 		return nil, fmt.Errorf("同步会覆盖非本来源路径：\n%s", strings.Join(lines, "\n"))
 	}
 
-	// 3. 参与分发的目标。两种情况都产出提示而不是静默：正常界面已经把它们
-	//    标成不可勾并说明原因，能走到这里说明是客户端直接调用（或界面过期
-	//    快照）。
-	warnings := []string{}
+	// 2. 参与分发的目标。skip 产出提示而不是静默：正常界面已经把它们标成
+	//    不可勾并说明原因，能走到这里说明是客户端直接调用（或界面过期快照）。
 	resolved, err := resolveIDs(config, input.TargetIDs)
 	if err != nil {
 		return nil, err
 	}
-	participating := make([]*managedTarget, 0, len(resolved))
-	for i := range resolved {
-		target := &resolved[i]
-		switch {
-		case target.skip == nil:
-			participating = append(participating, target)
-		// 与报错路径同一说法，只在前面加「已跳过」这个处置结果。
-		case *target.skip == SkipMissing:
-			warnings = append(warnings, fmt.Sprintf("%s，已跳过。", targetUnavailable(target.id)))
-		case *target.skip == SkipLinkedDir:
-			warnings = append(warnings, fmt.Sprintf("%s 的 skills 目录是软链接，内容由链接另一端负责，已跳过。", target.id))
-		}
-	}
-	selectedEntries := make([]selectedSkill, 0, len(selectedSkills))
-	for _, skill := range selectedSkills {
-		selectedEntries = append(selectedEntries, selectedSkill{name: skill.Name, relativePath: skill.RelativePath})
-	}
+	participating, warnings := participatingTargets(resolved, nil)
+	selectedEntries := toSelectedSkills(selectedSkills)
 
-	// 4. 先清掉本来源在这批目标上的旧链接，再按选中集合装回去；两次操作
+	// 3. 先清掉本来源在这批目标上的旧链接，再按选中集合装回去；两次操作
 	//    共用同一份目标列表，同步不会碰用户没选的目标。
 	install := newSkillInstall(sourceRoot)
 	removedItems, err := install.removeInstalled(participating)
@@ -383,13 +349,25 @@ func PreviewSourceSyncConflictsInner(store *WorkspaceConfigStore, input SourceSy
 	if err != nil {
 		return nil, err
 	}
-	sourceDefinition, err := sourceDefinitionFromConfig(config, input.SourceID)
+	// 执行与预演共用 syncSelection：预演会报的，同步才会覆盖，靠的是同一份
+	// 输入解释，不是两处代码人工对齐。
+	sourceRoot, selectedSkills, err := syncSelection(store, config, &input)
 	if err != nil {
 		return nil, err
 	}
-	sourceRoot, discovered, err := sourceSyncSnapshot(store, sourceDefinition, &input)
+	return sourceSyncConflicts(config, sourceRoot, selectedSkills, input.TargetIDs)
+}
+
+// syncSelection：同步弹窗确认输入的解释（执行与预演共用）：来源定义 →
+// 弹窗快照/发现（打开时已刷新，确认不重拉）→ 勾选集合过滤。解释只此一份。
+func syncSelection(store *WorkspaceConfigStore, config *ResolvedManagerConfig, input *SourceSyncInput) (string, []DiscoveredSkill, error) {
+	sourceDefinition, err := sourceDefinitionFromConfig(config, input.SourceID)
 	if err != nil {
-		return nil, err
+		return "", nil, err
+	}
+	sourceRoot, discovered, err := sourceSyncSnapshot(store, sourceDefinition, input)
+	if err != nil {
+		return "", nil, err
 	}
 	selected := map[string]bool{}
 	for _, path := range input.SkillPaths {
@@ -401,8 +379,43 @@ func PreviewSourceSyncConflictsInner(store *WorkspaceConfigStore, input SourceSy
 			selectedSkills = append(selectedSkills, skill)
 		}
 	}
+	return sourceRoot, selectedSkills, nil
+}
 
-	return sourceSyncConflicts(config, sourceRoot, selectedSkills, input.TargetIDs)
+// toSelectedSkills：DiscoveredSkill 到安装面选择条目的转换（同步与预演共用）。
+func toSelectedSkills(skills []DiscoveredSkill) []selectedSkill {
+	selected := make([]selectedSkill, 0, len(skills))
+	for _, skill := range skills {
+		selected = append(selected, selectedSkill{name: skill.Name, relativePath: skill.RelativePath})
+	}
+	return selected
+}
+
+// participatingTargets：resolveIDs/managedTargets 结果里真正参与分发的目标。
+// skip 的处置文案（「已跳过」系列，与报错路径同一说法）随行返回，调用方
+// 决定记 warning 还是丢弃（预演/卸载静默）；filter 非空时按所选地址过滤，
+// skip 提示也只覆盖所选目标。判定与呈现的关联只此一份。
+func participatingTargets(resolved []managedTarget, targetIDs *map[string]bool) ([]*managedTarget, []string) {
+	participating := make([]*managedTarget, 0, len(resolved))
+	notes := []string{}
+	for i := range resolved {
+		target := &resolved[i]
+		if targetIDs != nil && !(*targetIDs)[target.id] {
+			continue
+		}
+		if target.skip != nil {
+			switch *target.skip {
+			// 与报错路径同一说法，只在前面加「已跳过」这个处置结果。
+			case SkipMissing:
+				notes = append(notes, fmt.Sprintf("%s，已跳过。", targetUnavailable(target.id)))
+			case SkipLinkedDir:
+				notes = append(notes, fmt.Sprintf("%s 的 skills 目录是软链接，内容由链接另一端负责，已跳过。", target.id))
+			}
+			continue
+		}
+		participating = append(participating, target)
+	}
+	return participating, notes
 }
 
 func sourceSyncConflicts(config *ResolvedManagerConfig, sourceRoot string, selectedSkills []DiscoveredSkill, targetIDs []string) ([]SourceSyncConflict, error) {
@@ -411,16 +424,8 @@ func sourceSyncConflicts(config *ResolvedManagerConfig, sourceRoot string, selec
 	if err != nil {
 		return nil, err
 	}
-	participating := make([]*managedTarget, 0)
-	for i := range resolved {
-		if resolved[i].skip == nil {
-			participating = append(participating, &resolved[i])
-		}
-	}
-	selected := make([]selectedSkill, 0, len(selectedSkills))
-	for _, skill := range selectedSkills {
-		selected = append(selected, selectedSkill{name: skill.Name, relativePath: skill.RelativePath})
-	}
+	participating, _ := participatingTargets(resolved, nil)
+	selected := toSelectedSkills(selectedSkills)
 
 	installConflicts, err := newSkillInstall(sourceRoot).conflicts(participating, selected)
 	if err != nil {
@@ -971,17 +976,7 @@ func removeSourceSymlinksWithRoot(config *ResolvedManagerConfig, sourceRoot stri
 	if err != nil {
 		return nil, err
 	}
-	participating := make([]*managedTarget, 0)
-	for i := range targets {
-		target := &targets[i]
-		if target.skip != nil {
-			continue
-		}
-		if targetIDs != nil && !(*targetIDs)[target.id] {
-			continue
-		}
-		participating = append(participating, target)
-	}
+	participating, _ := participatingTargets(targets, targetIDs)
 
 	items, err := newSkillInstall(sourceRoot).removeInstalled(participating)
 	if err != nil {
@@ -1573,7 +1568,9 @@ func wildcardMatch(value string, pattern string) bool {
 // parseGitOwnerRepo：从常见 git URL 形态取 owner/repo（https、ssh、scp
 // 风格、裸 owner/repo）。
 func parseGitOwnerRepo(repo string) (string, string, bool) {
-	trimmed := strings.TrimSuffix(strings.TrimSpace(repo), ".git")
+	// Windows 本地路径的两种分隔符都合法，先归一为 / 再按段取 owner/repo
+	//（远端 URL 不会含反斜杠，归一无副作用）。
+	trimmed := strings.TrimSuffix(strings.TrimSpace(strings.ReplaceAll(repo, "\\", "/")), ".git")
 	if trimmed == "" {
 		return "", "", false
 	}

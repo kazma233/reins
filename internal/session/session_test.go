@@ -86,7 +86,7 @@ func TestParseSourceAppRoundTripAndRejectsUnknown(t *testing.T) {
 
 func TestSpecRootFollowsEnvRedirectAndHomeFallback(t *testing.T) {
 	tempHome := testsupport.TestDir(t, "spec-root")
-	guard := testsupport.SetHome(t, tempHome)
+	guard := homeGuard(t, tempHome)
 
 	// HOME 兜底：codex 根 = HOME/.codex。
 	root, err := SpecRoot(SourceCodex)

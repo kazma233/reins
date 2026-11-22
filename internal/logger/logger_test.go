@@ -21,6 +21,11 @@ func TestLoggerFormatPathAndSilentFailure(t *testing.T) {
 	home := testsupport.TestDir(t, "logger")
 	guard := testsupport.SetHome(t, home)
 	defer guard.Restore()
+	// Windows 的 UserConfigDir 读 %AppData% 而非 HOME，一并重定向进守卫
+	// home——漏掉会把真实应用日志读进断言（并把测试行写进真实日志）。
+	if runtime.GOOS == "windows" {
+		t.Setenv("APPDATA", filepath.Join(home, "AppData", "Roaming"))
+	}
 
 	// 未初始化：静默返回，不落任何文件。
 	Info("before init")

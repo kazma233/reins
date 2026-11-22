@@ -22,7 +22,7 @@ func TestSetHomeGuardRoundTrip(t *testing.T) {
 	if got := os.Getenv("REINS_TEST_HOME"); got != dir {
 		t.Fatalf("REINS_TEST_HOME 应指向临时目录（子进程继承通道）：got %q want %q", got, dir)
 	}
-	for _, name := range toolHomeVars {
+	for _, name := range toolHomeVars() {
 		if _, set := os.LookupEnv(name); set {
 			t.Fatalf("%s 应被守卫清空", name)
 		}
@@ -65,7 +65,7 @@ func TestSetPiSessionDirRoundTrip(t *testing.T) {
 
 func capture(t *testing.T) []savedVar {
 	t.Helper()
-	names := append([]string{"HOME", "REINS_TEST_HOME"}, toolHomeVars...)
+	names := append([]string{"HOME", "REINS_TEST_HOME"}, toolHomeVars()...)
 	saved := make([]savedVar, 0, len(names)+1)
 	for _, name := range names {
 		value, set := os.LookupEnv(name)

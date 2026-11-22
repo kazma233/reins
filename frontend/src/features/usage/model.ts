@@ -1,3 +1,5 @@
+import { AGENT_ID_ALIASES, AGENT_LABELS } from "@shared/lib/agent-labels";
+// token 展示口径与 sessions 共用（域边界决策白名单豁免的唯一条目）。
 import { cacheHitRate, totalConsumedTokens } from "../sessions/token-usage";
 import { SourceApp } from "./types";
 import type {
@@ -31,7 +33,19 @@ export const USAGE_WINDOWS = [
 
 export type UsageWindowDays = (typeof USAGE_WINDOWS)[number]["days"];
 
-// 来源与模型筛选都是单值选择:"all" 表示不筛选(与来源选择的 ALL_SOURCES 同形);
+// 来源筛选是统计页的本地裁剪值域，与 sessions 列表请求的 source_app="all"
+// 是两回事，不经 sessions 域借道（域边界决策 usage 条目）。
+export type UsageSourceFilter = SourceApp | "all";
+
+export const ALL_SOURCES: "all" = "all";
+
+// 产品名走生成的 agent-labels（单一来源在 internal/agents），组合方式与
+// sessions 的 formatSourceAppName 同款。
+export function formatSourceAppName(sourceApp: SourceApp): string {
+  const canonicalId = AGENT_ID_ALIASES[sourceApp] ?? sourceApp;
+  return AGENT_LABELS[canonicalId] ?? sourceApp;
+}
+
 // 模型名取自转录,不会等于 "all"。
 export const ALL_MODELS = "all";
 

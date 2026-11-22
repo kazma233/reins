@@ -25,7 +25,7 @@ func TestCodexEngineReadsWithoutTouchingProcessEnv(t *testing.T) {
 		`{"timestamp": "2026-04-21T12:00:02.000Z", "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "text", "text": "How do I list the current files?"}]}}`,
 	))
 
-	engine := NewReaderEngine[CodexSessionRow](CodexSpec{}, dir, filepath.Join(dir, "store"))
+	engine := engineAt(t, CodexSpec{}, dir, filepath.Join(dir, "store"))
 
 	entries, err := engine.ListEntries()
 	if err != nil {
@@ -69,7 +69,7 @@ func TestClaudeEngineReadsWithoutTouchingProcessEnv(t *testing.T) {
 		fmt.Sprintf(`{"type": "user", "timestamp": "2026-04-21T12:00:00.000Z", "sessionId": %q, "cwd": "/tmp/reins/workspace", "message": {"role": "user", "content": [{"type": "text", "text": "How do I list the current files?"}]}}`, sessionID),
 	))
 
-	engine := NewReaderEngine[ClaudeSessionRow](ClaudeSpec{}, dir, filepath.Join(dir, "store"))
+	engine := engineAt(t, ClaudeSpec{}, dir, filepath.Join(dir, "store"))
 
 	entries, err := engine.ListEntries()
 	if err != nil {
@@ -123,7 +123,7 @@ func TestOpenCodeEngineReadsCustomRootWithoutEnv(t *testing.T) {
 	dir := t.TempDir()
 	seedOpenCodeFamilyAt(t, dir, "ses_engine_root", "ses_engine_child")
 
-	engine := NewReaderEngine[OpenCodeSessionRow](OpenCodeSpec{}, dir, filepath.Join(dir, "store"))
+	engine := engineAt(t, OpenCodeSpec{}, dir, filepath.Join(dir, "store"))
 
 	entries, err := engine.ListEntries()
 	if err != nil {
@@ -155,7 +155,7 @@ func TestZcodeEngineReadsCustomRootWithoutEnv(t *testing.T) {
 	dbPath := filepath.Join(dir, "db.sqlite")
 	seedZcodeFamilyAt(t, dbPath, "ses_engine_root", "ses_engine_child")
 
-	engine := NewReaderEngine[ZcodeSessionRow](ZcodeSpec{}, dbPath, filepath.Join(dir, "store"))
+	engine := engineAt(t, ZcodeSpec{}, dbPath, filepath.Join(dir, "store"))
 
 	entries, err := engine.ListEntries()
 	if err != nil {
@@ -193,7 +193,7 @@ func TestOpenCodeEngineWithoutSessionV2TableListsEmpty(t *testing.T) {
 	mustExec(t, db, "CREATE TABLE other (id TEXT);")
 	db.Close()
 
-	engine := NewReaderEngine[OpenCodeSessionRow](OpenCodeSpec{}, dir, filepath.Join(dir, "store"))
+	engine := engineAt(t, OpenCodeSpec{}, dir, filepath.Join(dir, "store"))
 	entries, err := engine.ListEntries()
 	if err != nil {
 		t.Fatalf("list entries: %v", err)
@@ -206,7 +206,7 @@ func TestOpenCodeEngineWithoutSessionV2TableListsEmpty(t *testing.T) {
 func TestOpenCodeEngineWithoutDBListsEmptyWithoutCreatingIt(t *testing.T) {
 	dir := t.TempDir()
 
-	engine := NewReaderEngine[OpenCodeSessionRow](OpenCodeSpec{}, dir, filepath.Join(dir, "store"))
+	engine := engineAt(t, OpenCodeSpec{}, dir, filepath.Join(dir, "store"))
 	entries, err := engine.ListEntries()
 	if err != nil {
 		t.Fatalf("list entries: %v", err)
@@ -224,7 +224,7 @@ func TestCodexEngineWithoutSessionsDirListsEmpty(t *testing.T) {
 	dir := t.TempDir()
 	// 只建 codex 根目录（~/.codex 在登录/配置阶段就有），sessions 子目录还没有。
 
-	engine := NewReaderEngine[CodexSessionRow](CodexSpec{}, dir, filepath.Join(dir, "store"))
+	engine := engineAt(t, CodexSpec{}, dir, filepath.Join(dir, "store"))
 	entries, err := engine.ListEntries()
 	if err != nil {
 		t.Fatalf("list entries: %v", err)
@@ -241,7 +241,7 @@ func TestZcodeEngineWithoutSessionTableListsEmpty(t *testing.T) {
 	mustExec(t, db, "CREATE TABLE other (id TEXT);")
 	db.Close()
 
-	engine := NewReaderEngine[ZcodeSessionRow](ZcodeSpec{}, dbPath, filepath.Join(dir, "store"))
+	engine := engineAt(t, ZcodeSpec{}, dbPath, filepath.Join(dir, "store"))
 	entries, err := engine.ListEntries()
 	if err != nil {
 		t.Fatalf("list entries: %v", err)
@@ -264,7 +264,7 @@ func TestOpenCodeContribUpdatesIncrementallyOnDBWrites(t *testing.T) {
 		`{"time": {"created": 1744366402000}, "model": {"providerID": "p1", "id": "model-x"}, "tokens": {"input": 100, "output": 40, "reasoning": 10, "cache": {"read": 5, "write": 2}}}`)
 	db.Close()
 
-	engine := NewReaderEngine[OpenCodeSessionRow](OpenCodeSpec{}, dir, filepath.Join(dir, "store"))
+	engine := engineAt(t, OpenCodeSpec{}, dir, filepath.Join(dir, "store"))
 
 	// 首次扫描全量提取；usage 口径：input 不含缓存读，output 并 reasoning。
 	first, err := engine.ListEntries()
@@ -298,7 +298,7 @@ func TestOpenCodeContribUpdatesIncrementallyOnDBWrites(t *testing.T) {
 	if err != nil {
 		t.Fatalf("incremental list: %v", err)
 	}
-	fresh := NewReaderEngine[OpenCodeSessionRow](OpenCodeSpec{}, dir, filepath.Join(dir, "store_fresh"))
+	fresh := engineAt(t, OpenCodeSpec{}, dir, filepath.Join(dir, "store_fresh"))
 	full, err := fresh.ListEntries()
 	if err != nil {
 		t.Fatalf("fresh list: %v", err)

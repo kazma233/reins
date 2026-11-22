@@ -1,10 +1,13 @@
 package session
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 
 	"reins/internal/support"
@@ -537,9 +540,7 @@ func TestGrokbuildRejectsUnknownIDsAndSymlinkedAuxFiles(t *testing.T) {
 		t.Error("unknown id via command entry must error")
 	}
 	// chat_history.jsonl 指向根外的符号链接被兄弟文件防线拦截。
-	if err := symlinkFile(outside, filepath.Join(filepath.Dir(path), "chat_history.jsonl")); err != nil {
-		t.Fatalf("symlink: %v", err)
-	}
+	symlinkFile(t, outside, filepath.Join(filepath.Dir(path), "chat_history.jsonl"))
 	if _, err := readerMust(t, SourceGrokBuild).ParseMessages("safe"); err == nil {
 		t.Error("symlinked aux file must error")
 	}
@@ -706,7 +707,16 @@ func osRename(oldPath string, newPath string) error {
 }
 
 // symlinkFile：unix 的符号链接夹具。
-func symlinkFile(target string, link string) error {
+// symlinkFile：创建符号链接夹具。Windows 未开开发者模式且非管理员时
+// ERROR_PRIVILEGE_NOT_HELD（0x522=1314，数值字面量以避开平台专属常量）
+// ——该前提无法在夹具内满足，跳过并说明原因，而不是让套件在本机常红。
+func symlinkFile(t *testing.T, target string, link string) {
+	t.Helper()
 	_ = os.Remove(link)
-	return os.Symlink(target, link)
+	if err := os.Symlink(target, link); err != nil {
+		if runtime.GOOS == "windows" && errors.Is(err, syscall.Errno(1314)) {
+			t.Skipf("需要开发者模式或管理员权限才能创建符号链接: %v", err)
+		}
+		t.Fatalf("symlink: %v", err)
+	}
 }

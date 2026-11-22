@@ -13,11 +13,15 @@ import SessionList from "./components/SessionList.vue";
 import SourceSwitcher from "./components/SourceSwitcher.vue";
 import { createPagedList, type PagedResult } from "./composables/createPagedList";
 import { captureKeepAliveScroll } from "./composables/useKeepAliveScroll";
-import { sessionIdentityKey } from "./session-identity";
 import { useSessionWorkspaceState } from "./composables/useSessionWorkspaceState";
 import { joinClasses } from "@shared/lib/join-classes";
 import { useLoadElapsed } from "@shared/lib/use-load-elapsed";
-import { ALL_SOURCES, isSourceApp, type SourceSelection } from "./source-app";
+import { ALL_SOURCES, type SourceSelection } from "./source-app";
+import {
+  canLoadDetail,
+  placeholderOverview,
+  resolveSelectedSummary
+} from "./session-selection";
 import type { SessionPage, SessionSummary, SourceStatus } from "./types";
 import { extractErrorMessage } from "@shared/lib/errors";
 import { createRequestGuard } from "@shared/lib/request-guard";
@@ -79,31 +83,13 @@ onUnmounted(() => {
   unmounted = true;
 });
 
-const selectedSummary = computed(() => {
-  if (!selectedSessionKey.value) {
-    return null;
-  }
-
-  const visibleSummary = sessions.value.find(
-    (session) =>
-      sessionIdentityKey(session.sourceApp, session.sourceSessionId) ===
-      selectedSessionKey.value
-  );
-
-  if (visibleSummary) {
-    return visibleSummary;
-  }
-
-  // 合并视图下保留的详情摘要可能来自任意来源，复合键自带来源，不会再误伤。
-  const retainedSummary = sessionOverview.value?.summary ?? null;
-  const retainedMatches =
-    retainedSummary !== null &&
-    sessionIdentityKey(
-      retainedSummary.sourceApp,
-      retainedSummary.sourceSessionId
-    ) === selectedSessionKey.value;
-  return retainedMatches ? retainedSummary : null;
-});
+const selectedSummary = computed(() =>
+  resolveSelectedSummary(
+    sessions.value,
+    sessionOverview.value,
+    selectedSessionKey.value
+  )
+);
 
 function clearSelectedSession(options?: { invalidateDetailRequest?: boolean }) {
   if (options?.invalidateDetailRequest) {
@@ -231,25 +217,14 @@ watch(
       }
 
       const summary = selectedSummary.value;
-      // 合并视图下详情按会话自身的来源加载，只有单一来源才要求来源一致。
-      if (
-        !summary ||
-        (isSourceApp(selectedSource.value) &&
-          summary.sourceApp !== selectedSource.value)
-      ) {
+      if (!canLoadDetail(summary, selectedSource.value)) {
         sessionStore.setSessionOverview(null);
         sessionStore.setLoadingDetail(false);
         return;
       }
 
       sessionStore.setLoadingDetail(true);
-      sessionStore.setSessionOverview({
-        summary,
-        sourcePaths: [summary.transcriptPath],
-        messageCount: null,
-        eventCount: null,
-        agents: []
-      });
+      sessionStore.setSessionOverview(placeholderOverview(summary));
 
       try {
         const nextDetail = await getSessionOverview(

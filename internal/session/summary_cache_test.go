@@ -33,6 +33,7 @@ func TestSummaryStoreThenLoadRoundTripsAndMtimeGatesHits(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open summary db: %v", err)
 	}
+	defer db.Close()
 	path := "/tmp/some-transcript.jsonl"
 
 	// mtime 未变时命中，变化后失效。
@@ -64,6 +65,7 @@ func TestSummaryRowsAreIsolatedPerSourceApp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open summary db: %v", err)
 	}
+	defer db.Close()
 	path := "/tmp/some-transcript.jsonl"
 	db.Store(SourceCodex, path, 100, cachedSummary("codex title"))
 
@@ -80,6 +82,7 @@ func TestSummaryClearAllInvalidatesEveryRow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open summary db: %v", err)
 	}
+	defer db.Close()
 	path := "/tmp/some-transcript.jsonl"
 	db.Store(SourceCodex, path, 100, cachedSummary("codex title"))
 	db.ClearAll()
@@ -114,6 +117,7 @@ func TestOpeningCurrentDBRemovesStaleVersionFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open summary db: %v", err)
 	}
+	defer db.Close()
 	path := "/tmp/some-transcript.jsonl"
 	db.Store(SourceCodex, path, 100, cachedSummary("codex title"))
 

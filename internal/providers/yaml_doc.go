@@ -40,6 +40,16 @@ func unmarshalProvidersDocument(content []byte) (*rawProvidersDocument, error) {
 			}
 		}
 	}
+	// 缺键（旧版本写入的存量文件）解码为 nil map；写入方（如
+	// SetAppReasoningLevel）按 emptyDocument 的口径直接赋值条目，nil 会在
+	// 那里 panic。这里统一归一成空 map，维持「loadDocumentLocked 出来的
+	// 文档 map 恒非 nil」的不变量；落盘形态不变（nil 与空 map 序列化相同）。
+	if file.Providers == nil {
+		file.Providers = map[string]rawProvider{}
+	}
+	if file.AppSettings == nil {
+		file.AppSettings = map[ProviderApp]ProviderAppSetting{}
+	}
 	return &rawProvidersDocument{
 		Version:     *file.Version,
 		Providers:   file.Providers,

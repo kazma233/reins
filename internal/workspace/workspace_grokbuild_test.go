@@ -90,10 +90,10 @@ func TestGrokbuildExplicitPathsWinAndOldConfigIsUnchanged(t *testing.T) {
 	if target == nil {
 		t.Fatal("grokbuild target exists")
 	}
-	if target.SkillDir != filepath.Join(root, "explicit", "skills") {
+	if target.SkillDir != joinPath(root, "explicit/skills") {
 		t.Fatalf("skill_dir：%s", target.SkillDir)
 	}
-	if target.ConfigPath == nil || *target.ConfigPath != filepath.Join(root, "explicit", "config.toml") {
+	if target.ConfigPath == nil || *target.ConfigPath != joinPath(root, "explicit/config.toml") {
 		t.Fatalf("config_path：%+v", target.ConfigPath)
 	}
 	if _, err := store.LoadDocument(); err != nil {
@@ -189,10 +189,11 @@ func TestGrokbuildProjectLayoutAndSkillLinkLifecycle(t *testing.T) {
 	if project == nil {
 		t.Fatal("demo:grokbuild target exists")
 	}
-	if project.SkillDir != filepath.Join(root, "project", ".grok", "skills") {
+	// 项目 target 的落点 = 项目 path 解析结果 + spec 项目布局（两级 joinPath）。
+	if project.SkillDir != joinPath(joinPath(root, "project"), ".grok/skills") {
 		t.Fatalf("project skill_dir：%s", project.SkillDir)
 	}
-	if project.ConfigPath == nil || *project.ConfigPath != filepath.Join(root, "project", ".grok", "config.toml") {
+	if project.ConfigPath == nil || *project.ConfigPath != joinPath(joinPath(root, "project"), ".grok/config.toml") {
 		t.Fatalf("project config_path：%+v", project.ConfigPath)
 	}
 	if project.MCPConfigType != agents.McpConfigGrokBuild {

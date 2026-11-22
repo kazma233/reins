@@ -6,7 +6,7 @@
 
 ## 命名约定
 
-1. 前端业务域统一使用复数目录：`src/features/sessions/`、`src/features/workspace/`、`src/features/providers/`。
+1. 前端业务域统一使用复数目录：`src/features/sessions/`、`src/features/workspace/`、`src/features/providers/`、`src/features/usage/`。
 2. Rust 业务域统一使用单数模块：`src-tauri/src/session/`、`src-tauri/src/workspace/`、`src-tauri/src/providers/`。
 3. UI 文案继续使用“历史会话”和“配置与分发”，不强行暴露内部 `workspace` 命名；`providers` 域的 UI 文案为“模型配置”。
 4. `manager` 只允许出现在历史兼容数据名或稳定文件名里，不再作为代码边界命名。
@@ -30,6 +30,13 @@
 1. 负责聚合平台（官方 OpenAI / Anthropic 以外的一切平台与自建网关）的 CRUD、API Key 管理、模型目录、五个工具全局配置的应用与反读。
 2. 只依赖 `shared/*` 和 `app/*` 的稳定入口。
 3. 不依赖 `features/sessions/*`、`features/workspace/*`。
+
+### `usage`
+
+1. 负责会话统计页：时间窗裁剪、来源与模型筛选、趋势图表与指标推导——全量日序列是唯一事实源，推导在前端（bindings 契约注释口径）。
+2. 数据经 bindings 直连 session 域 `SessionService.GetUsageStats`（实现在 `internal/session/usage_stats`），不经 sessions 域 api 借道。
+3. token 展示口径与 sessions 共用：对 `sessions` 的跨域 import 仅白名单豁免 `sessions/token-usage.ts`（依赖红线第 4 条）。
+4. 来源筛选值域自有（统计页的本地裁剪，与 sessions 列表请求的 `source_app="all"` 是两回事），不借 sessions 的 `SourceSelection`/`ALL_SOURCES`。
 
 ### `shared`
 
@@ -93,9 +100,11 @@
 1. `session`、`workspace`、`providers` 两两之间禁止直接互相依赖。
 2. 新增一级模块 `agents`（工具静态清单）：三域均可依赖它；`agents` 自身不依赖任何业务域，仅引用 `SourceApp`、`ProviderAppId`、`McpConfigType` 等枚举类型做跨域 id 映射与布局字段。
 3. `shared` 禁止依赖 `features/*`。
-4. `support` 禁止依赖 `session`、`workspace` 和 `providers` DTO。
-5. 新增代码如果需要跨域复用，先判断它是否真的是稳定共享能力，否则仍留在各自业务域。
+4. `usage` 是会话数据的统计视图域（2026-11-21 增补）：数据经 bindings 直连 session 域，对 `sessions` 的跨域 import 仅白名单豁免 `sessions/token-usage.ts`（token 展示口径单一来源，见 `2026-10-12-architecture-review-backlog.md` C13）；除此之外，`features/*` 两两禁依赖同样覆盖 usage 与其他域之间。
+5. `support` 禁止依赖 `session`、`workspace` 和 `providers` DTO。
+6. 新增代码如果需要跨域复用，先判断它是否真的是稳定共享能力，否则仍留在各自业务域。
 
 ## 变更记录
 
+- 2026-11-21 增补——usage 升为第四业务域（会话统计视图，`2026-11-19-usage-stats-top-level-tab.md` 的后续收尾）：数据经 bindings 直连 `SessionService.GetUsageStats`；token 展示口径白名单豁免 `sessions/token-usage.ts`；来源筛选值域自有，不再借用 sessions 的 `SourceSelection`/`ALL_SOURCES`。
 - 2026-10-09 增补——工具清单五份拷贝收敛为 `agents` 模块单一来源（本次）。

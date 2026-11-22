@@ -16,14 +16,15 @@ import {
   protocolLabel,
   providerSyncApps,
   providerSyncInput,
+  providerSyncResultText,
+  providerSyncTargets,
   emptyProviderForm,
   validateProviderForm,
   type ProviderFormState,
-  type ProviderSyncApp,
+  type ProviderSyncTargets,
 } from "../../model";
 import { useProvidersAction, type RunProvidersActionOptions } from "../../composables/useProvidersAction";
 import { ProviderWriteMode, type ProvidersState } from "@bindings/reins/internal/providers/models";
-import type { ProviderApp } from "@bindings/reins/internal/agents/models";
 import ProviderEditDialog from "../dialogs/ProviderEditDialog.vue";
 import ProviderSyncDialog from "../dialogs/ProviderSyncDialog.vue";
 
@@ -61,54 +62,23 @@ const syncResults = reactive<
 const syncDialog = reactive({ open: false, providerId: "" });
 const syncError = ref<string | null>(null);
 
-// 每个提供商的同步候选与硬阻断：已应用/漂移条目的工具是候选，阻断只剩
-// 协议不兼容与未设 Key——模型取舍改由弹窗勾选表达。
-const syncAppsByProvider = computed(() => {
-  const map = new Map<string, ProviderSyncApp[]>();
+// 每个提供商的同步三态（目标/跳过清单/按钮提示）：已应用/漂移条目的工具
+// 是候选，阻断只剩协议不兼容与未设 Key——模型取舍改由弹窗勾选表达；判定
+// 与文案在 providerSyncTargets 一处，面板只做按提供商缓存。
+const syncTargetsByProvider = computed(() => {
+  const map = new Map<string, ProviderSyncTargets>();
   const current = state.value;
   if (current) {
     for (const provider of current.providers ?? []) {
-      map.set(provider.id, providerSyncApps(current, provider));
+      map.set(provider.id, providerSyncTargets(providerSyncApps(current, provider)));
     }
   }
   return map;
 });
 
-function syncAppsFor(providerId: string): ProviderSyncApp[] {
-  return syncAppsByProvider.value.get(providerId) ?? [];
-}
-
-function syncTargetsFor(providerId: string): ProviderApp[] {
-  return syncAppsFor(providerId)
-    .filter((item) => item.blockers.length === 0)
-    .map((item) => item.app);
-}
-
-function syncSkipsFor(providerId: string): ProviderSyncApp[] {
-  return syncAppsFor(providerId).filter((item) => item.blockers.length > 0);
-}
-
-// 阻断原因是完整句子，嵌入提示时去掉句尾句号再统一收尾。
-function reasonText(reason: string): string {
-  return reason.replace(/。+$/, "");
-}
-
-// 「未同步」清单条目：工具名（原因），弹窗与卡片常驻结果共用同一格式。
-function syncSkipLines(providerId: string): string[] {
-  return syncSkipsFor(providerId).map(
-    (item) => `${appLabel(item.app)}（${reasonText(item.blockers.join(""))}）`
-  );
-}
-
-function syncButtonTitle(providerId: string): string {
-  const apps = syncAppsFor(providerId);
-  if (apps.length === 0) {
-    return "尚未应用到任何 Agent。";
-  }
-  if (syncTargetsFor(providerId).length === 0) {
-    return `无法同步：${syncSkipLines(providerId).join("；")}。`;
-  }
-  return "";
+function syncTargetsFor(providerId: string): ProviderSyncTargets {
+  // 查不到（state 未加载或提供商已不在列表）与「无候选」同口径。
+  return syncTargetsByProvider.value.get(providerId) ?? providerSyncTargets([]);
 }
 
 const syncProvider = computed(
@@ -122,7 +92,7 @@ const syncInitialSelection = computed(() => {
   if (!current || !provider) {
     return [];
   }
-  return initialSyncSelection(current, provider, syncTargetsFor(provider.id));
+  return initialSyncSelection(current, provider, syncTargetsFor(provider.id).targets);
 });
 
 function openSyncDialog(providerId: string) {
@@ -210,8 +180,7 @@ function runSync(modelIds: string[]) {
   if (!current || !provider) {
     return;
   }
-  const targets = syncTargetsFor(providerId);
-  const skipLines = syncSkipLines(providerId);
+  const { targets, skipLines } = syncTargetsFor(providerId);
   delete syncResults[providerId];
   runProvidersAction({
     action: async () => {
@@ -231,7 +200,7 @@ function runSync(modelIds: string[]) {
     onSuccess: ({ synced, failures }) => {
       syncDialog.open = false;
       syncResults[providerId] = {
-        message: syncResultText(synced, failures, skipLines),
+        message: providerSyncResultText(synced, failures, skipLines),
         tone: failures.length > 0 ? "danger" : "body",
       };
     },
@@ -240,18 +209,6 @@ function runSync(modelIds: string[]) {
       syncError.value = message;
     },
   });
-}
-
-// 同步结果句：已同步 / 跳过原因 / 逐项失败明细合成一句，常驻在卡片上。
-function syncResultText(synced: string[], failures: string[], skipLines: string[]): string {
-  const parts = [synced.length > 0 ? `已同步到 ${synced.join("、")}` : "没有可同步的 Agent"];
-  if (skipLines.length > 0) {
-    parts.push(`未同步：${skipLines.join("；")}`);
-  }
-  if (failures.length > 0) {
-    parts.push(`失败：${failures.join("；")}`);
-  }
-  return `${parts.join("；")}。`;
 }
 
 function confirmDeleteProvider() {
@@ -330,9 +287,9 @@ function confirmDeleteProvider() {
           />
           <button
             class="secondary-button"
-            :disabled="runningAction || syncTargetsFor(provider.id).length === 0"
+            :disabled="runningAction || syncTargetsFor(provider.id).targets.length === 0"
             type="button"
-            :title="syncButtonTitle(provider.id)"
+            :title="syncTargetsFor(provider.id).buttonTitle"
             @click="openSyncDialog(provider.id)"
           >
             同步
@@ -368,8 +325,8 @@ function confirmDeleteProvider() {
       :open="syncDialog.open"
       :loading="runningAction"
       :provider="syncProvider"
-      :target-apps="syncTargetsFor(syncDialog.providerId)"
-      :skip-lines="syncSkipLines(syncDialog.providerId)"
+      :target-apps="syncTargetsFor(syncDialog.providerId).targets"
+      :skip-lines="syncTargetsFor(syncDialog.providerId).skipLines"
       :initial-selected-ids="syncInitialSelection"
       :error="syncError"
       @close="syncDialog.open = false"

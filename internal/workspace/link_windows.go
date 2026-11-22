@@ -142,11 +142,16 @@ func utf16Substring(payload []byte, base int, offset int, length int) string {
 	return windows.UTF16ToString(chars)
 }
 
-// createJunction：在 destination 建 junction 指向 source。destination 不存
-// 在时由 OPEN_ALWAYS + BACKUP_SEMANTICS 建目录（junction crate 同款行为）。
+// createJunction：在 destination 建 junction 指向 source。目标目录（含父级）
+// 先建好，再以 OPEN_EXISTING 重开句柄设置 reparse 数据——同句柄 OPEN_ALWAYS
+// 建目录后直接设置 reparse，在新内核（26300 起）会被 ERROR_DIRECTORY 拒绝；
+// junction crate 注释宣称的「OPEN_ALWAYS 顺带建目录」在该形态上已不可用。
 func createJunction(source string, destination string) error {
 	absoluteSource, err := filepath.Abs(source)
 	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(destination, 0o777); err != nil {
 		return err
 	}
 	utf16Destination, err := windows.UTF16PtrFromString(destination)
@@ -154,7 +159,7 @@ func createJunction(source string, destination string) error {
 		return err
 	}
 	handle, err := windows.CreateFile(utf16Destination, windows.GENERIC_WRITE, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE,
-		nil, windows.OPEN_ALWAYS, windows.FILE_FLAG_OPEN_REPARSE_POINT|windows.FILE_FLAG_BACKUP_SEMANTICS, 0)
+		nil, windows.OPEN_EXISTING, windows.FILE_FLAG_OPEN_REPARSE_POINT|windows.FILE_FLAG_BACKUP_SEMANTICS, 0)
 	if err != nil {
 		return err
 	}
@@ -193,11 +198,15 @@ func deleteJunction(path string) error {
 
 // buildMountPointReparseData：构造 FSCTL_SET_REPARSE_POINT 的输入缓冲区
 // （REPARSE_DATA_BUFFER + mount point payload）。substitute name 带 \??\
-// 前缀，print name 用可读拼写——与 junction crate 落盘的字节布局一致。
+// 前缀，print name 用可读拼写——与 junction crate / mklink 落盘的字节布局
+// 一致：两个名字都是 NUL 结尾的宽串，长度字段不含 NUL，但偏移与
+// ReparseDataLength 含（PrintNameOffset 要跨过 substitute 的 NUL）。少了
+// NUL 或偏移不含 NUL，NTFS 以 "reparse point buffer is invalid" 拒绝写入。
 func buildMountPointReparseData(target string) []byte {
+	const terminatorBytes = 2
 	substitute := utf16Encode(`\??\` + target)
 	printName := utf16Encode(target)
-	pathBufferBytes := len(substitute) + len(printName)
+	pathBufferBytes := len(substitute) + terminatorBytes + len(printName) + terminatorBytes
 
 	// 8 字节 header + 8 字节 mount point 字段 + path buffer。
 	payloadLength := mountPointHeaderSize + pathBufferBytes
@@ -208,10 +217,13 @@ func buildMountPointReparseData(target string) []byte {
 	offset := 8
 	binary.LittleEndian.PutUint16(buffer[offset:offset+2], 0)
 	binary.LittleEndian.PutUint16(buffer[offset+2:offset+4], uint16(len(substitute)))
-	binary.LittleEndian.PutUint16(buffer[offset+4:offset+6], uint16(len(substitute)))
+	binary.LittleEndian.PutUint16(buffer[offset+4:offset+6], uint16(len(substitute)+terminatorBytes))
 	binary.LittleEndian.PutUint16(buffer[offset+6:offset+8], uint16(len(printName)))
-	copy(buffer[offset+mountPointHeaderSize:], substitute)
-	copy(buffer[offset+mountPointHeaderSize+len(substitute):], printName)
+	pos := offset + mountPointHeaderSize
+	copy(buffer[pos:], substitute)
+	// NUL 终止符由零值初始化落位，只推进写指针。
+	pos += len(substitute) + terminatorBytes
+	copy(buffer[pos:], printName)
 	return buffer
 }
 

@@ -19,6 +19,7 @@ func fixtureRows() []simpleRow {
 func TestRowsStoreThenLoadRoundTripsAndStampGatesHits(t *testing.T) {
 	dir := t.TempDir()
 	db := RowsDbAt(dir)
+	defer db.Close()
 
 	if rows, ok := LoadRows[simpleRow](db, SourceCodex, "/scan/root", "stamp:1"); ok {
 		t.Fatalf("empty cache should miss, got %+v", rows)
@@ -55,6 +56,7 @@ func TestRowsStoreThenLoadRoundTripsAndStampGatesHits(t *testing.T) {
 func TestRowsClearAllInvalidatesEveryRow(t *testing.T) {
 	dir := t.TempDir()
 	db := RowsDbAt(dir)
+	defer db.Close()
 	StoreRows(db, SourceCodex, "/scan/root", "stamp:1", fixtureRows())
 	db.ClearAll()
 
@@ -66,6 +68,7 @@ func TestRowsClearAllInvalidatesEveryRow(t *testing.T) {
 func TestRowsDeserializationFailureIsAMiss(t *testing.T) {
 	dir := t.TempDir()
 	db := RowsDbAt(dir)
+	defer db.Close()
 	// 存入的形状与请求的类型不符，读出按 miss 而不是报错。
 	StoreRows(db, SourceCodex, "/scan/root", "stamp:1", fixtureRows())
 	if _, ok := LoadRows[string](db, SourceCodex, "/scan/root", "stamp:1"); ok {
@@ -76,6 +79,7 @@ func TestRowsDeserializationFailureIsAMiss(t *testing.T) {
 func TestRowsContribRoundTripStampGatesAndRemoval(t *testing.T) {
 	dir := t.TempDir()
 	db := RowsDbAt(dir)
+	defer db.Close()
 
 	// 空表按空集处理，不报错。
 	if contribs := db.LoadContribs(SourceOpenCode, "/db"); len(contribs) != 0 {
@@ -124,6 +128,7 @@ func TestRowsContribRoundTripStampGatesAndRemoval(t *testing.T) {
 func TestRowsSyncRemovesBeyondSQLParameterLimitInBatches(t *testing.T) {
 	dir := t.TempDir()
 	db := RowsDbAt(dir)
+	defer db.Close()
 
 	const count = 32767
 	upserts := make([]Contrib, 0, count)
@@ -149,6 +154,7 @@ func TestRowsSyncRemovesBeyondSQLParameterLimitInBatches(t *testing.T) {
 func TestRowsSyncUpsertsAndRemovalsCommitAtomically(t *testing.T) {
 	dir := t.TempDir()
 	db := RowsDbAt(dir)
+	defer db.Close()
 
 	// 一次事务里先 upsert 200 行再分批删 150 行，验证混合操作在同一事务内
 	// 原子生效。

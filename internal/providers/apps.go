@@ -14,7 +14,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -693,57 +692,37 @@ func WriteFiles(files []FileOutput, restricted []string) error {
 }
 
 // ---------------------------------------------------------------------------
-// map[string]any 的小工具：JSON/TOML 共用同一套树形操作
+// map[string]any 的小工具：域内名号，口径统一在 support（As* 断言与
+// SortedKeys——miss 语义与 json.Number 精度处理只此一份）。
 // ---------------------------------------------------------------------------
 
 func asObject(value any) (map[string]any, bool) {
-	object, ok := value.(map[string]any)
-	return object, ok
+	return support.AsObject(value)
 }
 
 func asArray(value any) ([]any, bool) {
-	array, ok := value.([]any)
-	return array, ok
+	return support.AsArray(value)
 }
 
 func asString(value any) (string, bool) {
-	text, ok := value.(string)
-	return text, ok
+	return support.AsString(value)
 }
 
 func asInt64(value any) (int64, bool) {
-	switch typed := value.(type) {
-	case int64:
-		return typed, true
-	case int:
-		return int64(typed), true
-	case json.Number:
-		parsed, err := typed.Int64()
-		if err != nil {
-			return 0, false
-		}
-		return parsed, true
-	}
-	return 0, false
+	return support.AsInt64(value)
 }
 
 func asBool(value any) (bool, bool) {
-	flag, ok := value.(bool)
-	return flag, ok
+	return support.AsBool(value)
 }
 
 // sortedStringKeys：排序字典遍历序。Rust BTreeMap 迭代恒为字典序，反读
 // 条目顺序与匹配优先级依赖它。
 func sortedStringKeys(object map[string]any) []string {
-	return sortedMapKeys(object)
+	return support.SortedKeys(object)
 }
 
 // sortedMapKeys：同上，值类型泛型版（models.dev 目录等专用 map 也共用）。
 func sortedMapKeys[V any](object map[string]V) []string {
-	keys := make([]string, 0, len(object))
-	for key := range object {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	return keys
+	return support.SortedKeys(object)
 }

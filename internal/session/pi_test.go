@@ -1171,6 +1171,48 @@ func TestPiFoldsSubagentTaskRunsIntoTheParentFamily(t *testing.T) {
 
 // —— 小件 ——
 
+// 直构接缝：root 与持久缓存目录都由参数注入，不经 env 重定向即可测试——
+// 与引擎系的 NewReaderEngine(spec, root, storeDir) 同待遇；生产路径仍经
+// piReaderInstance.current 解析 HOME（由 readerMust 系测试覆盖）。
+func TestPiReaderDirectConstructionInjectsRootAndStoreDir(t *testing.T) {
+	root := t.TempDir()
+	store := tempStore(t)
+	path := filepath.Join(root, "2026-11-22T10-00-00-000Z_pi-direct.jsonl")
+	writeJSONLFile(t, path, jsonlLines(t,
+		piHeaderLine("pi-direct", "/tmp/pi-project", "2026-11-22T10:00:00.000Z"),
+		piEntryLine("message", "user-1", nil, "2026-11-22T10:00:01.000Z", `"message": {"role": "user", "content": "direct question"}`),
+		piEntryLine("message", "assistant-1", str("user-1"), "2026-11-22T10:00:02.000Z", `"message": {"role": "assistant", "content": [{"type": "text", "text": "direct answer"}]}`),
+	))
+
+	r := newPiReader(root, store)
+	defer r.Close()
+
+	// 与 piReaderInstance.ListEntries/ParseSummary 同一条部件链（实例层只是
+	// current() 外的薄转发）。
+	index, err := r.familyIndex()
+	if err != nil {
+		t.Fatalf("family index: %v", err)
+	}
+	if len(index.Families) != 1 || index.Families[0].Root.id != "pi-direct" {
+		t.Fatalf("families = %+v, want one pi-direct", index.Families)
+	}
+	family, err := r.familyForID("pi-direct")
+	if err != nil {
+		t.Fatalf("family for id: %v", err)
+	}
+	summary, err := r.familySummary(family)
+	if err != nil {
+		t.Fatalf("family summary: %v", err)
+	}
+	if summary.Title != "direct question" {
+		t.Errorf("title = %q, want direct question", summary.Title)
+	}
+	// storeDir 注入生效：familySummary 触发持久层连接，库文件落在注入目录。
+	if !pathExists(filepath.Join(store, SummaryDBFileName)) {
+		t.Errorf("summary db missing under injected storeDir %s", store)
+	}
+}
+
 func str(value string) *string { return &value }
 
 func readerMust(t *testing.T, app SourceApp) Reader {

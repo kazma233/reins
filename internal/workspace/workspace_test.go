@@ -1006,7 +1006,8 @@ func TestDefaultConfigTemplateParsesWithBuiltinTargets(t *testing.T) {
 	if !piOK {
 		wantPiDir = joinPath(home, ".pi/agent")
 	}
-	if pi.ConfigPath == nil || *pi.ConfigPath != joinPath(wantPiDir, "mcp.json") {
+	// 模板把 <agentDir>/mcp.json 按字面拼出，分隔符保持 / 形态。
+	if pi.ConfigPath == nil || *pi.ConfigPath != wantPiDir+"/mcp.json" {
 		t.Fatalf("pi config_path：%+v", pi.ConfigPath)
 	}
 	if pi.MCPConfigPrefix != "mcpServers" || pi.MCPConfigType != agents.McpConfigCommon {
@@ -1085,10 +1086,10 @@ func TestTargetPresetsCoverBuiltinAgentsWithEnvResolvedPaths(t *testing.T) {
 	}
 
 	codex := byID("codex")
-	if codex.Label != "Codex" || codex.SkillDir != joinPath(home, ".agents/skills") {
+	if codex.Label != "Codex" || codex.SkillDir != filepath.Join(home, ".agents/skills") {
 		t.Fatalf("codex preset：%+v", codex)
 	}
-	if codex.ConfigPath == nil || *codex.ConfigPath != joinPath(home, ".codex/config.toml") {
+	if codex.ConfigPath == nil || *codex.ConfigPath != filepath.Join(home, ".codex/config.toml") {
 		t.Fatalf("codex config_path：%+v", codex.ConfigPath)
 	}
 	if codex.MCPConfigPrefix != "mcp_servers" {
@@ -1096,10 +1097,10 @@ func TestTargetPresetsCoverBuiltinAgentsWithEnvResolvedPaths(t *testing.T) {
 	}
 
 	claude := byID("claude")
-	if claude.Label != "Claude Code" || claude.SkillDir != joinPath(home, ".claude/skills") {
+	if claude.Label != "Claude Code" || claude.SkillDir != filepath.Join(home, ".claude/skills") {
 		t.Fatalf("claude preset：%+v", claude)
 	}
-	if claude.ConfigPath == nil || *claude.ConfigPath != joinPath(home, ".claude/.claude.json") {
+	if claude.ConfigPath == nil || *claude.ConfigPath != filepath.Join(home, ".claude/.claude.json") {
 		t.Fatalf("claude config_path：%+v", claude.ConfigPath)
 	}
 	if claude.MCPConfigPrefix != "mcpServers" {
@@ -1107,10 +1108,10 @@ func TestTargetPresetsCoverBuiltinAgentsWithEnvResolvedPaths(t *testing.T) {
 	}
 
 	opencode := byID("opencode")
-	if opencode.Label != "OpenCode" || opencode.SkillDir != joinPath(home, ".config/opencode/skills") {
+	if opencode.Label != "OpenCode" || opencode.SkillDir != filepath.Join(home, ".config/opencode/skills") {
 		t.Fatalf("opencode preset：%+v", opencode)
 	}
-	if opencode.ConfigPath == nil || *opencode.ConfigPath != joinPath(home, ".config/opencode/opencode.json") {
+	if opencode.ConfigPath == nil || *opencode.ConfigPath != filepath.Join(home, ".config/opencode/opencode.json") {
 		t.Fatalf("opencode config_path：%+v", opencode.ConfigPath)
 	}
 	if opencode.MCPConfigPrefix != "mcp.servers" {
@@ -1118,10 +1119,10 @@ func TestTargetPresetsCoverBuiltinAgentsWithEnvResolvedPaths(t *testing.T) {
 	}
 
 	zcode := byID("zcode")
-	if zcode.Label != "ZCode" || zcode.SkillDir != joinPath(home, ".zcode/skills") {
+	if zcode.Label != "ZCode" || zcode.SkillDir != filepath.Join(home, ".zcode/skills") {
 		t.Fatalf("zcode preset：%+v", zcode)
 	}
-	if zcode.ConfigPath == nil || *zcode.ConfigPath != joinPath(home, ".zcode/cli/config.json") {
+	if zcode.ConfigPath == nil || *zcode.ConfigPath != filepath.Join(home, ".zcode/cli/config.json") {
 		t.Fatalf("zcode config_path：%+v", zcode.ConfigPath)
 	}
 	if zcode.MCPConfigPrefix != "mcp.servers" {
@@ -1154,10 +1155,10 @@ func TestTargetPresetsCoverBuiltinAgentsWithEnvResolvedPaths(t *testing.T) {
 
 	// dsh 按现状 defaults：cordis patch 路径 + 空 prefix。
 	dsh := byID("dsh")
-	if dsh.Label != "DeepSeek Harness" || dsh.SkillDir != joinPath(home, ".dsh/skills") {
+	if dsh.Label != "DeepSeek Harness" || dsh.SkillDir != filepath.Join(home, ".dsh/skills") {
 		t.Fatalf("dsh preset：%+v", dsh)
 	}
-	if dsh.ConfigPath == nil || *dsh.ConfigPath != joinPath(home, ".dsh/cordis.patch.yml") {
+	if dsh.ConfigPath == nil || *dsh.ConfigPath != filepath.Join(home, ".dsh/cordis.patch.yml") {
 		t.Fatalf("dsh config_path：%+v", dsh.ConfigPath)
 	}
 	if dsh.MCPConfigPrefix != "" {
@@ -1421,10 +1422,11 @@ func TestPiPresetAndTemplateFollowPiCodingAgentDir(t *testing.T) {
 	if !ok {
 		t.Fatal("pi target exists")
 	}
-	if pi.SkillDir != joinPath(redirected, "skills") {
+	// 模板把解析结果归一为 / 形态落盘（config.yaml 的可移植性口径）。
+	if pi.SkillDir != filepath.ToSlash(redirected)+"/skills" {
 		t.Fatalf("pi skill_dir：%s", pi.SkillDir)
 	}
-	if pi.ConfigPath == nil || *pi.ConfigPath != joinPath(redirected, "mcp.json") {
+	if pi.ConfigPath == nil || *pi.ConfigPath != filepath.ToSlash(redirected)+"/mcp.json" {
 		t.Fatalf("pi config_path：%+v", pi.ConfigPath)
 	}
 }
@@ -1505,14 +1507,14 @@ func TestProjectIDRejectsColonAndSlash(t *testing.T) {
 	store, root := newTestStore(t, "project-id-charset")
 	writeFileT(t, store.ConfigPath(), "{}\n")
 
-	for _, bad := range []string{"a:b", "web/apps"} {
+	for _, bad := range []string{"a:b", "web/apps", `a\b`} {
 		_, err := CreateWorkspaceProjectInner(store, ProjectMutationInput{
 			ProjectID: bad,
 			Path:      filepath.Join(root, "project"),
 			Agents:    []string{"codex"},
 		})
 		if err == nil {
-			t.Fatalf("含 : 或 / 的 project id 必须被拒绝：%s", bad)
+			t.Fatalf("含 : / \\ 的 project id 必须被拒绝：%s", bad)
 		}
 		if !strings.Contains(err.Error(), "不能包含") {
 			t.Fatalf("错误文案要说清原因：%v", err)
@@ -1523,6 +1525,13 @@ func TestProjectIDRejectsColonAndSlash(t *testing.T) {
 	writeFileT(t, store.ConfigPath(), fmt.Sprintf("projects:\n  a:b:\n    path: %s\n    agents:\n      codex: {}\n", filepath.Join(root, "project")))
 	if _, err := store.Parse(); err == nil {
 		t.Fatal("解析阶段就要拒绝含 : 的 project id")
+	} else if !strings.Contains(err.Error(), "不能包含") {
+		t.Fatalf("错误文案：%v", err)
+	}
+
+	writeFileT(t, store.ConfigPath(), fmt.Sprintf("projects:\n  a\\b:\n    path: %s\n    agents:\n      codex: {}\n", filepath.Join(root, "project")))
+	if _, err := store.Parse(); err == nil {
+		t.Fatal("解析阶段就要拒绝含 \\ 的 project id")
 	} else if !strings.Contains(err.Error(), "不能包含") {
 		t.Fatalf("错误文案：%v", err)
 	}
@@ -1784,10 +1793,10 @@ func TestProjectPiAgentUsesPiProjectLayout(t *testing.T) {
 		t.Fatal("pi project agent exists")
 	}
 
-	if target.SkillDir != filepath.Join(projectPath, ".pi", "skills") {
+	if target.SkillDir != joinPath(projectPath, ".pi/skills") {
 		t.Fatalf("skill_dir：%s", target.SkillDir)
 	}
-	if target.ConfigPath == nil || *target.ConfigPath != filepath.Join(projectPath, ".pi", "mcp.json") {
+	if target.ConfigPath == nil || *target.ConfigPath != joinPath(projectPath, ".pi/mcp.json") {
 		t.Fatalf("config_path：%+v", target.ConfigPath)
 	}
 	if target.MCPConfigPrefix != "mcpServers" || target.MCPConfigType != agents.McpConfigCommon {
@@ -1820,7 +1829,7 @@ func TestProjectOpencodeAgentUsesOpencodeProjectLayout(t *testing.T) {
 	}
 	mcpConfigPath := filepath.Join(projectPath, "opencode.json")
 
-	if target.SkillDir != filepath.Join(projectPath, ".opencode", "skills") {
+	if target.SkillDir != joinPath(projectPath, ".opencode/skills") {
 		t.Fatalf("skill_dir：%s", target.SkillDir)
 	}
 	if target.ConfigPath == nil || *target.ConfigPath != mcpConfigPath {
@@ -1854,9 +1863,9 @@ func TestProjectZcodeAgentUsesZcodeProjectLayout(t *testing.T) {
 	if !ok {
 		t.Fatal("zcode project agent exists")
 	}
-	mcpConfigPath := filepath.Join(projectPath, ".zcode", "config.json")
+	mcpConfigPath := joinPath(projectPath, ".zcode/config.json")
 
-	if target.SkillDir != filepath.Join(projectPath, ".zcode", "skills") {
+	if target.SkillDir != joinPath(projectPath, ".zcode/skills") {
 		t.Fatalf("skill_dir：%s", target.SkillDir)
 	}
 	if target.ConfigPath == nil || *target.ConfigPath != mcpConfigPath {
@@ -2267,4 +2276,42 @@ func parseTOMLT(t *testing.T, content string) map[string]any {
 // tomlEqual：TOML map 的语义相等（BurntSushi 输出的类型在同一枚举器下稳定）。
 func tomlEqual(left map[string]any, right map[string]any) bool {
 	return fmt.Sprintf("%#v", left) == fmt.Sprintf("%#v", right)
+}
+
+// participatingTargets：skip 判定与三种呈现（同步记 warnings、预演/卸载
+// 丢弃 notes）的归一点，直测处置文案与过滤行为。
+func TestParticipatingTargetsSkipNotesAndFilter(t *testing.T) {
+	missing := SkipMissing
+	linked := SkipLinkedDir
+	resolved := []managedTarget{
+		{id: "codex"},
+		{id: "gone", skip: &missing},
+		{id: "project:pi", skip: &linked},
+		{id: "claude"},
+	}
+
+	// 不过滤：全部判定的 skip 都有处置文案，顺序与输入一致。
+	participating, notes := participatingTargets(resolved, nil)
+	if len(participating) != 2 || participating[0].id != "codex" || participating[1].id != "claude" {
+		t.Fatalf("participating = %+v", participating)
+	}
+	if len(notes) != 2 {
+		t.Fatalf("notes = %+v", notes)
+	}
+	if !strings.Contains(notes[0], "gone") || !strings.Contains(notes[0], "已跳过") {
+		t.Fatalf("missing 文案应点名 target 并说明处置：%q", notes[0])
+	}
+	if !strings.Contains(notes[1], "project:pi") || !strings.Contains(notes[1], "软链接") {
+		t.Fatalf("linked-dir 文案应说明链接语义：%q", notes[1])
+	}
+
+	// 按所选地址过滤：未选中的（含 skip）不出现在任何一侧。
+	filter := map[string]bool{"claude": true, "gone": true}
+	participating, notes = participatingTargets(resolved, &filter)
+	if len(participating) != 1 || participating[0].id != "claude" {
+		t.Fatalf("过滤后 participating = %+v", participating)
+	}
+	if len(notes) != 1 || !strings.Contains(notes[0], "gone") {
+		t.Fatalf("过滤后 notes 只含所选 skip：%+v", notes)
+	}
 }

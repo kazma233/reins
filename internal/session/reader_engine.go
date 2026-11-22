@@ -929,11 +929,12 @@ func (r *FamilyReader[R]) Engine() (*ReaderEngine[R], error) {
 		r.slotEngine.Close()
 	}
 
-	home, ok := support.UserHomeDir()
-	if !ok {
-		return nil, fmt.Errorf("Unable to determine home directory")
+	// 持久缓存目录随实例解析（测试直构时经参数注入，脱离进程 env）。
+	storeDir, err := reinsStoreDir()
+	if err != nil {
+		return nil, err
 	}
-	engine := NewReaderEngine[R](r.spec, root, joinPath(home, ".reins"))
+	engine := NewReaderEngine[R](r.spec, root, storeDir)
 	r.slotRoot = root
 	r.slotEngine = engine
 	return engine, nil

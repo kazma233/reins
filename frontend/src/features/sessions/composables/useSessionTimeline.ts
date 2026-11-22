@@ -19,7 +19,9 @@ export type TimelineLoader<T> = {
   reset: () => void;
 };
 
-function createTimelineLoader<T>(
+// createTimelineLoader：时间线加载的竞态机器（导出供直测；请求 key 守卫、
+// reset 与加载位语义在这里，与 createPagedList 同级）。
+export function createTimelineLoader<T>(
   requestKey: () => string | null,
   fetchAll: (requestId: string) => Promise<T[]>,
   fallbackError: string

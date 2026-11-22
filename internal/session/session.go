@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
@@ -189,10 +188,14 @@ func comparePaths(left string, right string) int {
 	}
 }
 
+// splitPathComponents：对齐 Rust PathBuf 的分量切分——Windows 下 / 与 \
+// 都是合法分隔符，转录里的路径多为 / 形态，按单一平台分隔符切会把整串
+// 当成一个分量，分量序与整串字节序的大小关系随之分叉。
 func splitPathComponents(path string) []string {
-	trimmed := strings.Trim(path, string(filepath.Separator))
+	normalized := strings.ReplaceAll(path, "\\", "/")
+	trimmed := strings.Trim(normalized, "/")
 	if trimmed == "" {
 		return nil
 	}
-	return strings.Split(trimmed, string(filepath.Separator))
+	return strings.Split(trimmed, "/")
 }

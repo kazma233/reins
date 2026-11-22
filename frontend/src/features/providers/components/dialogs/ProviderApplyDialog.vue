@@ -21,6 +21,7 @@ import {
   CODEX_RESTART_HINT,
   findAppState,
   initialApplySelection,
+  providerApplyInput,
   reasoningEffortWrite,
   reasoningIntersectionNote,
   reasoningLevelChoices,
@@ -83,7 +84,10 @@ watch(
 );
 
 const appState = computed(() => findAppState(props.state, props.app));
-const additive = computed(() => appState.value?.additive ?? true);
+// additive 工具的档位与供应商无关：跟随 Agent 页的工具级默认设置，弹窗
+// 内不提供档位控件，也不做模型交集。appState 缺失按非 additive 处理
+// （弹窗只能从工具卡片打开，实际不可达；模板提示与档位分支共用此判定）。
+const isAdditive = computed(() => appState.value?.additive ?? false);
 // 该工具不写入的模型元数据提示；无此类字段时为 null 不展示。
 const unwrittenFieldsText = computed(() =>
   appState.value ? unwrittenModelFieldsText(appState.value) : null
@@ -111,9 +115,6 @@ const levelOptions = computed<ReasoningLevel[]>(() => {
   );
 });
 
-// additive 工具的档位与供应商无关：跟随 Agent 页的工具级默认设置，
-// 弹窗内不提供档位控件，也不做模型交集。
-const isAdditive = computed(() => appState.value?.additive ?? false);
 const toolLevelLine = computed(() =>
   appState.value ? toolLevelText(appState.value) : null
 );
@@ -180,27 +181,20 @@ function toggleModel(modelId: string, checked: boolean) {
   }
 }
 
-function buildInput(): ApplyProviderInput {
-  return {
-    providerId: props.provider.id,
-    app: props.app,
+// 弹窗只组装原始选择状态；档位与候选的叠加规则在 providerApplyInput 一处。
+function currentInput(): ApplyProviderInput {
+  return providerApplyInput(appState.value, props.provider, props.app, {
     modelIds: selectedModelIds.value,
     defaultModelId: defaultModelId.value,
-    // additive：档位来自工具级设置（Agent 页），弹窗不参与选择。
-    // 非 additive：弹窗所选档位须在交集候选内，否则视为不写。
-    defaultReasoningLevel: isAdditive.value
-      ? (appState.value?.appReasoningLevel ?? null)
-      : levelOptions.value.includes(defaultReasoningLevel.value as ReasoningLevel)
-        ? defaultReasoningLevel.value
-        : null,
-  };
+    defaultReasoningLevel: defaultReasoningLevel.value,
+  });
 }
 
 async function runPreview() {
   previewLoading.value = true;
   previewError.value = null;
   try {
-    preview.value = await previewProviderApply(buildInput());
+    preview.value = await previewProviderApply(currentInput());
   } catch (error) {
     // 后端错误经 extractErrorMessage 归一（Error 与字符串形态都能透出原因）。
     previewError.value = extractErrorMessage(error, "生成预览失败。");
@@ -211,7 +205,7 @@ async function runPreview() {
 }
 
 function confirm() {
-  emit("confirm", buildInput());
+  emit("confirm", currentInput());
 }
 
 const previewText = computed(() => {
@@ -272,7 +266,7 @@ function renderDiff(lines: DiffLine[]): string {
     <div class="providers-form-grid providers-form-grid--full">
       <p class="providers-section-hint">
         {{
-          additive
+          isAdditive
             ? "该工具支持多个聚合提供商并存，本次应用只新增/更新本提供商的条目。"
             : "该工具只保留一个活动聚合提供商，本次应用会替换旧提供商的配置。"
         }}

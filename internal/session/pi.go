@@ -67,10 +67,12 @@ func (b *piReaderInstance) current() (*PiReader, error) {
 		b.slot.reader.Close()
 	}
 
-	reader, err := newPiReader(root)
+	// 持久缓存目录随实例解析（测试直构时经参数注入，脱离进程 env）。
+	storeDir, err := reinsStoreDir()
 	if err != nil {
 		return nil, err
 	}
+	reader := newPiReader(root, storeDir)
 	b.slot = &piSlot{root: root, reader: reader}
 	return reader, nil
 }
@@ -157,18 +159,15 @@ type piEntry struct {
 	value     any
 }
 
-func newPiReader(sessionsRoot string) (*PiReader, error) {
-	// 持久缓存目录随实例解析：测试切根即换库，与既有全局层同一份库文件格式。
-	home, ok := support.UserHomeDir()
-	if !ok {
-		return nil, fmt.Errorf("Unable to determine home directory")
-	}
-	storeDir := filepath.Join(home, ".reins")
+// newPiReader：reader 级测试的直构入口（root 与持久缓存目录都由参数注入，
+// 脱离进程 env）——与引擎系的 NewReaderEngine(spec, root, storeDir) 同待遇；
+// 生产路径经 piReaderInstance.current 注入 HOME 解析的库目录。
+func newPiReader(sessionsRoot string, storeDir string) *PiReader {
 	return &PiReader{
 		sessionsRoot: sessionsRoot,
 		timeline:     NewDualHalfCache("Pi timeline"),
 		summaries:    NewSummaryMemCache(SourcePi, "Pi summary", SummaryDbAt(storeDir)),
-	}, nil
+	}
 }
 
 // ClearCache：reader 级清缓存（timeline + summaries + index）。

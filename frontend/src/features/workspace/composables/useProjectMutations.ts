@@ -91,7 +91,9 @@ export function useProjectMutations(workspace: WorkspaceStateContext) {
         const shouldAutoFillId = !projectCreateDialog.form.projectId.trim();
         projectCreateDialog.form.path = newPath;
         if (shouldAutoFillId) {
-          projectCreateDialog.form.projectId = newPath.split("/").pop() ?? "";
+          // Windows 目录框返回 `\` 分隔路径，Unix 是 `/`，两种都要取尾段。
+          projectCreateDialog.form.projectId =
+            newPath.split(/[\\/]/).pop() ?? "";
         }
         clearProjectFormError("path");
         clearProjectFormError("projectId");

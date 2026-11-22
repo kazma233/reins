@@ -27,8 +27,12 @@ import {
   normalizeProviderIdInput,
   protocolCompatible,
   protocolIncompatibleTip,
+  providerApplyInput,
   providerSyncApps,
   providerSyncInput,
+  providerSyncResultText,
+  providerSyncTargets,
+  type ProviderSyncApp,
   reasoningEffortMappingText,
   reasoningEffortWrite,
   reasoningIntersectionNote,
@@ -567,6 +571,84 @@ describe("mergeFetchedModels", () => {
   });
 });
 
+describe("providerApplyInput", () => {
+  it("passes the raw selection through with the provider id and app", () => {
+    const input = providerApplyInput(appState(), provider(), ProviderApp.ProviderCodex, {
+      modelIds: ["glm-4.5", "glm-4.6"],
+      defaultModelId: "glm-4.6",
+      defaultReasoningLevel: ReasoningLevel.ReasoningHigh,
+    });
+    expect(input).toEqual({
+      providerId: "openrouter",
+      app: "codex",
+      modelIds: ["glm-4.5", "glm-4.6"],
+      defaultModelId: "glm-4.6",
+      defaultReasoningLevel: "high",
+    });
+  });
+
+  it("writes the tool-level default for additive apps regardless of the dialog selection", () => {
+    const input = providerApplyInput(
+      appState({ additive: true, appReasoningLevel: ReasoningLevel.ReasoningLow }),
+      provider(),
+      ProviderApp.ProviderCodex,
+      { modelIds: ["glm-4.5"], defaultModelId: "glm-4.5", defaultReasoningLevel: ReasoningLevel.ReasoningHigh }
+    );
+    expect(input.defaultReasoningLevel).toBe("low");
+  });
+
+  it("writes no level for additive apps without a tool-level default", () => {
+    const input = providerApplyInput(
+      appState({ additive: true }),
+      provider(),
+      ProviderApp.ProviderCodex,
+      { modelIds: ["glm-4.5"], defaultModelId: "glm-4.5", defaultReasoningLevel: ReasoningLevel.ReasoningHigh }
+    );
+    expect(input.defaultReasoningLevel).toBeNull();
+  });
+
+  it("keeps the chosen level when it stays in the intersection candidates", () => {
+    const input = providerApplyInput(appState(), provider(), ProviderApp.ProviderCodex, {
+      modelIds: ["glm-4.5"],
+      defaultModelId: "glm-4.5",
+      defaultReasoningLevel: ReasoningLevel.ReasoningMedium,
+    });
+    expect(input.defaultReasoningLevel).toBe("medium");
+  });
+
+  it("keeps the chosen level even when the catalog narrowed — current is always a candidate", () => {
+    const narrowed = provider({
+      models: [{ id: "glm-4.5", label: "glm-4.5", reasoningLevels: [ReasoningLevel.ReasoningLow] }],
+    });
+    const input = providerApplyInput(appState(), narrowed, ProviderApp.ProviderCodex, {
+      modelIds: ["glm-4.5"],
+      defaultModelId: "glm-4.5",
+      defaultReasoningLevel: ReasoningLevel.ReasoningHigh,
+    });
+    // 与 providerSyncInput 同一契约：目录收窄不把已选档位静默抹掉。
+    expect(input.defaultReasoningLevel).toBe("high");
+  });
+
+  it("writes no level when the dialog selection has none", () => {
+    const input = providerApplyInput(appState(), provider(), ProviderApp.ProviderCodex, {
+      modelIds: ["glm-4.5"],
+      defaultModelId: "glm-4.5",
+      defaultReasoningLevel: null,
+    });
+    expect(input.defaultReasoningLevel).toBeNull();
+  });
+
+  it("writes no level when the app state is missing (unreachable in practice, dialog opens from an app card)", () => {
+    const input = providerApplyInput(undefined, provider(), ProviderApp.ProviderCodex, {
+      modelIds: ["glm-4.5"],
+      defaultModelId: "glm-4.5",
+      defaultReasoningLevel: ReasoningLevel.ReasoningHigh,
+    });
+    expect(input.defaultReasoningLevel).toBeNull();
+    expect(input.modelIds).toEqual(["glm-4.5"]);
+  });
+});
+
 describe("provider sync", () => {
   function entry(providerId: string, overrides: Partial<ProviderAppEntry> = {}): ProviderAppEntry {
     return {
@@ -745,6 +827,68 @@ describe("provider sync", () => {
       ];
       const input = providerSyncInput(stateOf(apps, [target]), target, ProviderApp.ProviderCodex, ["glm-4.5"]);
       expect(input.defaultReasoningLevel).toBe("high");
+    });
+  });
+
+  describe("providerSyncTargets", () => {
+    it("says not applied yet when there is no candidate app", () => {
+      expect(providerSyncTargets([])).toEqual({
+        targets: [],
+        skipLines: [],
+        buttonTitle: "尚未应用到任何 Agent。",
+      });
+    });
+
+    it("blocks the sync and lists per-app reasons when every candidate is blocked", () => {
+      const apps: ProviderSyncApp[] = [
+        { app: ProviderApp.ProviderCodex, blockers: ["协议不兼容。"] },
+        { app: ProviderApp.ProviderClaude, blockers: ["未设 API Key。", "协议不兼容。"] },
+      ];
+      const result = providerSyncTargets(apps);
+      expect(result.targets).toEqual([]);
+      // 阻断句嵌入行内时去掉句尾句号，多条原因按原顺序拼接。
+      expect(result.skipLines).toEqual([
+        "Codex（协议不兼容）",
+        "Claude Code（未设 API Key。协议不兼容）",
+      ]);
+      expect(result.buttonTitle).toBe(
+        "无法同步：Codex（协议不兼容）；Claude Code（未设 API Key。协议不兼容）。"
+      );
+    });
+
+    it("keeps unblocked apps as targets and leaves the button enabled on partial block", () => {
+      const apps: ProviderSyncApp[] = [
+        { app: ProviderApp.ProviderCodex, blockers: [] },
+        { app: ProviderApp.ProviderClaude, blockers: ["未设 API Key。"] },
+      ];
+      const result = providerSyncTargets(apps);
+      expect(result.targets).toEqual([ProviderApp.ProviderCodex]);
+      expect(result.skipLines).toEqual(["Claude Code（未设 API Key）"]);
+      expect(result.buttonTitle).toBe("");
+    });
+  });
+
+  describe("providerSyncResultText", () => {
+    it("composes a synced-only sentence", () => {
+      expect(providerSyncResultText(["Codex"], [], [])).toBe("已同步到 Codex。");
+    });
+
+    it("composes synced, skipped and failed segments into one sentence", () => {
+      expect(
+        providerSyncResultText(
+          ["Codex", "ZCode"],
+          ["Grok Build：连接超时"],
+          ["Claude Code（未设 API Key）"]
+        )
+      ).toBe(
+        "已同步到 Codex、ZCode；未同步：Claude Code（未设 API Key）；失败：Grok Build：连接超时。"
+      );
+    });
+
+    it("says no syncable agent when nothing succeeded", () => {
+      expect(providerSyncResultText([], [], ["Claude Code（未设 API Key）"])).toBe(
+        "没有可同步的 Agent；未同步：Claude Code（未设 API Key）。"
+      );
     });
   });
 });

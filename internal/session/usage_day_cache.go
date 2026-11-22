@@ -95,11 +95,11 @@ func usageDayPathKey(path string) string {
 }
 
 func usageDayDBPath() (string, error) {
-	home, ok := support.UserHomeDir()
-	if !ok {
-		return "", fmt.Errorf("Unable to determine home directory")
+	dir, err := reinsStoreDir()
+	if err != nil {
+		return "", err
 	}
-	return filepath.Join(home, ".reins", UsageDayDBFileName), nil
+	return filepath.Join(dir, UsageDayDBFileName), nil
 }
 
 // usageDayWithConnection：每次调用重算库路径（home 可能被测试覆盖），路径

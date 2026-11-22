@@ -3,8 +3,9 @@ package session
 import (
 	"encoding/json"
 	"fmt"
-	"strconv"
 	"strings"
+
+	"reins/internal/support"
 )
 
 // JSONL 逐行解析（对齐 Rust 版 session/jsonl.rs）。
@@ -34,120 +35,59 @@ func jsonType(value any) (string, bool) {
 }
 
 // jsonString 沿 keys 逐层下钻取末层字符串值；任一层缺失或非字符串返回 false。
+// 下钻与叶子断言的口径在 support.PathValue / support.AsString。
 func jsonString(value any, keys ...string) (string, bool) {
-	current := value
-	for _, key := range keys {
-		object, ok := current.(map[string]any)
-		if !ok {
-			return "", false
-		}
-		current, ok = object[key]
-		if !ok {
-			return "", false
-		}
+	current, ok := support.PathValue(value, keys...)
+	if !ok {
+		return "", false
 	}
-	text, ok := current.(string)
-	return text, ok
+	return support.AsString(current)
 }
 
 // jsonU64 取 value[key] 的无符号整数值。json.Number 精确解析；负数、小数与
 // 超出 u64 的值都按缺失处理（对齐 serde as_u64）。
 func jsonU64(value any, key string) (uint64, bool) {
-	object, ok := value.(map[string]any)
+	object, ok := support.AsObject(value)
 	if !ok {
 		return 0, false
 	}
-	number, ok := object[key].(json.Number)
-	if !ok {
-		return 0, false
-	}
-	parsed, err := strconv.ParseUint(number.String(), 10, 64)
-	if err != nil {
-		return 0, false
-	}
-	return parsed, true
+	return support.AsUint64(object[key])
 }
 
 // jsonI64 取 value[key] 的整数值（serde as_i64 口径：浮点字面量按缺失处理）。
 func jsonI64(value any, key string) (int64, bool) {
-	object, ok := value.(map[string]any)
+	object, ok := support.AsObject(value)
 	if !ok {
 		return 0, false
 	}
-	number, ok := object[key].(json.Number)
-	if !ok {
-		return 0, false
-	}
-	parsed, err := strconv.ParseInt(number.String(), 10, 64)
-	if err != nil {
-		return 0, false
-	}
-	return parsed, true
+	return support.AsInt64(object[key])
 }
 
 // jsonI64Path 沿 keys 逐层下钻取整数值（serde as_i64 口径）。
 func jsonI64Path(value any, keys ...string) (int64, bool) {
-	object, ok := value.(map[string]any)
+	current, ok := support.PathValue(value, keys...)
 	if !ok {
 		return 0, false
 	}
-	current := object
-	for i, key := range keys {
-		next, ok := current[key]
-		if !ok {
-			return 0, false
-		}
-		if i == len(keys)-1 {
-			number, ok := next.(json.Number)
-			if !ok {
-				return 0, false
-			}
-			parsed, err := strconv.ParseInt(number.String(), 10, 64)
-			if err != nil {
-				return 0, false
-			}
-			return parsed, true
-		}
-		current, ok = next.(map[string]any)
-		if !ok {
-			return 0, false
-		}
-	}
-	return 0, false
+	return support.AsInt64(current)
 }
 
 // jsonBool 取 value[key] 的布尔值。
 func jsonBool(value any, key string) (bool, bool) {
-	object, ok := value.(map[string]any)
+	object, ok := support.AsObject(value)
 	if !ok {
 		return false, false
 	}
-	flag, ok := object[key].(bool)
-	return flag, ok
+	return support.AsBool(object[key])
 }
 
 // jsonArray 沿 keys 逐层下钻取数组值（Value::as_array 守卫）。
 func jsonArray(value any, keys ...string) ([]any, bool) {
-	object, ok := value.(map[string]any)
+	current, ok := support.PathValue(value, keys...)
 	if !ok {
 		return nil, false
 	}
-	current := object
-	for i, key := range keys {
-		next, ok := current[key]
-		if !ok {
-			return nil, false
-		}
-		if i == len(keys)-1 {
-			items, ok := next.([]any)
-			return items, ok
-		}
-		current, ok = next.(map[string]any)
-		if !ok {
-			return nil, false
-		}
-	}
-	return nil, false
+	return support.AsArray(current)
 }
 
 // jsonMarshal / jsonUnmarshal：any ↔ 结构体的桥（strictUnmarshal 的底座）。

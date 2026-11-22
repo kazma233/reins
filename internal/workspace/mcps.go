@@ -522,24 +522,19 @@ func ensureJSONObjectPath(root map[string]any, path string) (map[string]any, err
 }
 
 // getJSONObjectPath：只读下钻；任何一段不是 object 或缺失返回 nil。
+// getJSONObjectPath：点分前缀下钻取子表（下钻口径在 support.PathValue，
+// 终值须是对象形态）。
 func getJSONObjectPath(root map[string]any, path string) map[string]any {
 	keys, err := splitConfigPath(path)
 	if err != nil {
 		return nil
 	}
-	current := root
-	for _, key := range keys {
-		entry, exists := current[key]
-		if !exists {
-			return nil
-		}
-		next, ok := entry.(map[string]any)
-		if !ok {
-			return nil
-		}
-		current = next
+	current, ok := support.PathValue(root, keys...)
+	if !ok {
+		return nil
 	}
-	return current
+	object, _ := support.AsObject(current)
+	return object
 }
 
 func ensureTOMLTablePath(root map[string]any, path string) (map[string]any, error) {

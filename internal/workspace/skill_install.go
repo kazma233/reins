@@ -503,7 +503,12 @@ func enumerateLinks(skillDir string) ([]enumeratedLink, error) {
 	entries, err := os.ReadDir(skillDir)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return []enumeratedLink{}, nil
+			// Windows 打开「路径是个文件」的目录句柄同样报 NotExist 类错误，
+			// 直接按不存在处理会把「读不出」静默吞成空清单；Stat 复核确实
+			// 不存在才算没有链接。
+			if _, statErr := os.Stat(skillDir); errors.Is(statErr, os.ErrNotExist) {
+				return []enumeratedLink{}, nil
+			}
 		}
 		return nil, fmt.Errorf("读取 target skills 目录失败：%s", skillDir)
 	}

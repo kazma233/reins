@@ -80,10 +80,60 @@ func canonicalTempHome(t *testing.T) string {
 }
 
 // homeGuard：进程级 home 守卫（对齐 Rust TestEnvGuard::set_home）；返回值
-// 供 SetPiSessionDir 等追加设置。
+// 供 SetPiSessionDir 等追加设置。收尾关闭全局读取器槽位与 usage-day 进程级
+// 连接——Windows 的 t.TempDir 清理删不掉仍被 SQLite 打开的库文件，连接必须
+// 先于目录清理释放（Unix 允许删除打开中的文件，这层关闭在那里是防御性的）。
 func homeGuard(t *testing.T, home string) *testsupport.EnvGuard {
 	t.Helper()
-	return testsupport.SetHome(t, home)
+	guard := testsupport.SetHome(t, home)
+	t.Cleanup(closeReaderSlots)
+	return guard
+}
+
+// closeReaderSlots：槽位清空后下一个测试按新根重建，与换根重建同一条路径。
+func closeReaderSlots() {
+	CodexReader.closeSlotForCleanup()
+	ClaudeCodeReader.closeSlotForCleanup()
+	OpenCodeReader.closeSlotForCleanup()
+	ZcodeReader.closeSlotForCleanup()
+	DshReader.closeSlotForCleanup()
+	PiReaderInstance.closeSlotForCleanup()
+	usageDayState.Lock()
+	if usageDayState.db != nil {
+		_ = usageDayState.db.Close()
+		usageDayState.db = nil
+		usageDayState.path = ""
+	}
+	usageDayState.Unlock()
+}
+
+// closeSlotForCleanup：仅测试夹具调用（生产路径经换根重建自行释放）。
+func (r *FamilyReader[R]) closeSlotForCleanup() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.slotEngine != nil {
+		r.slotEngine.Close()
+		r.slotEngine = nil
+		r.slotRoot = ""
+	}
+}
+
+func (b *piReaderInstance) closeSlotForCleanup() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.slot != nil {
+		b.slot.reader.Close()
+		b.slot = nil
+	}
+}
+
+// engineAt：引擎直构夹具（root 与持久缓存目录显式注入，脱离进程 env），
+// 收尾注册 Close——理由同 homeGuard 的收尾关闭。
+func engineAt[R FamilyRow](t *testing.T, spec FamilySpec[R], root string, storeDir string) *ReaderEngine[R] {
+	t.Helper()
+	engine := NewReaderEngine[R](spec, root, storeDir)
+	t.Cleanup(engine.Close)
+	return engine
 }
 
 // setRedirect：设置来源重定向变量并在测试结束时还原。

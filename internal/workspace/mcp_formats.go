@@ -95,52 +95,51 @@ func mcpFormatWriterFor(configType agents.McpConfigType) mcpFormatWriter {
 }
 
 var (
-	writerCommon    = &commonWriter{}
-	writerGrokBuild = &grokBuildWriter{}
-	writerOpenCode  = &openCodeWriter{}
+	writerCommon    = newFileWriter(&commonWriter{})
+	writerGrokBuild = newFileWriter(&grokBuildWriter{})
+	writerOpenCode  = newFileWriter(&openCodeWriter{})
 	writerDshPatch  = &dshPatchWriter{}
 )
 
-// 三个文件形态 writer 的四个操作入口全部委托共享引擎（Rust trait 默认方法的
-// 对应物；引擎经 detectSupportedFormat 回调 ensureFormatSupported）。
-
-func (w *commonWriter) readExistingEntries(prefix string, configPath string) (map[string]any, error) {
-	return readFileEntries(w, prefix, configPath)
-}
-func (w *commonWriter) previewEntry(configPath string, server *ResolvedMcpConfig) (string, string, error) {
-	return previewFileEntry(w, configPath, server)
-}
-func (w *commonWriter) applyEntry(target *ResolvedTargetConfig, configPath string, server *ResolvedMcpConfig) error {
-	return applyFileEntry(w, target, configPath, server)
-}
-func (w *commonWriter) removeEntry(target *ResolvedTargetConfig, configPath string, serverName string) (McpTargetMutationResult, error) {
-	return removeFileEntry(w, target, configPath, serverName)
+// fileWriterBase：文件形态四个操作入口的默认实现（Rust trait 默认方法的 Go
+// 对应物）——全部委托 mcps.go 的共享引擎，嵌入即得。引擎要回调外层 writer
+// 本体（ensureFormatSupported、desired 条目构造等），嵌入基自身拿不到接收
+// 者，self 由 newFileWriter 在构造时回填；文件形态 writer 一律经它构造，
+// 不得直接以零值 struct 参与分发（self 为 nil 会空回调）。
+type fileWriterBase struct {
+	self mcpFormatWriter
 }
 
-func (w *grokBuildWriter) readExistingEntries(prefix string, configPath string) (map[string]any, error) {
-	return readFileEntries(w, prefix, configPath)
-}
-func (w *grokBuildWriter) previewEntry(configPath string, server *ResolvedMcpConfig) (string, string, error) {
-	return previewFileEntry(w, configPath, server)
-}
-func (w *grokBuildWriter) applyEntry(target *ResolvedTargetConfig, configPath string, server *ResolvedMcpConfig) error {
-	return applyFileEntry(w, target, configPath, server)
-}
-func (w *grokBuildWriter) removeEntry(target *ResolvedTargetConfig, configPath string, serverName string) (McpTargetMutationResult, error) {
-	return removeFileEntry(w, target, configPath, serverName)
+// initSelf 回填外层 writer 本体（仅 newFileWriter 调用）。
+func (b *fileWriterBase) initSelf(self mcpFormatWriter) {
+	b.self = self
 }
 
-func (w *openCodeWriter) readExistingEntries(prefix string, configPath string) (map[string]any, error) {
-	return readFileEntries(w, prefix, configPath)
+func (b *fileWriterBase) readExistingEntries(prefix string, configPath string) (map[string]any, error) {
+	return readFileEntries(b.self, prefix, configPath)
 }
-func (w *openCodeWriter) previewEntry(configPath string, server *ResolvedMcpConfig) (string, string, error) {
-	return previewFileEntry(w, configPath, server)
+
+func (b *fileWriterBase) previewEntry(configPath string, server *ResolvedMcpConfig) (string, string, error) {
+	return previewFileEntry(b.self, configPath, server)
 }
-func (w *openCodeWriter) applyEntry(target *ResolvedTargetConfig, configPath string, server *ResolvedMcpConfig) error {
-	return applyFileEntry(w, target, configPath, server)
+
+func (b *fileWriterBase) applyEntry(target *ResolvedTargetConfig, configPath string, server *ResolvedMcpConfig) error {
+	return applyFileEntry(b.self, target, configPath, server)
 }
-func (w *openCodeWriter) removeEntry(target *ResolvedTargetConfig, configPath string, serverName string) (McpTargetMutationResult, error) {
-	return removeFileEntry(w, target, configPath, serverName)
+
+func (b *fileWriterBase) removeEntry(target *ResolvedTargetConfig, configPath string, serverName string) (McpTargetMutationResult, error) {
+	return removeFileEntry(b.self, target, configPath, serverName)
+}
+
+// newFileWriter：构造文件形态 writer 并回填嵌入基的 self。新增文件形态
+// writer：嵌入 fileWriterBase + 声明真差异（前缀约束、条目形态、格式约束），
+// 四个操作入口不用再写。
+func newFileWriter[W interface {
+	mcpFormatWriter
+	initSelf(mcpFormatWriter)
+}](w W) W {
+	w.initSelf(w)
+	return w
 }
 
 // ---------------------------------------------------------------------------
@@ -149,7 +148,7 @@ func (w *openCodeWriter) removeEntry(target *ResolvedTargetConfig, configPath st
 
 // commonWriter：通用 MCP 条目（标准 command/args/env），按配置文件扩展名写入
 // JSON 或 TOML 的 mcp 节点下。
-type commonWriter struct{}
+type commonWriter struct{ fileWriterBase }
 
 func (w *commonWriter) prefixRequired() bool { return true }
 
@@ -197,7 +196,7 @@ func (w *commonWriter) entryKeyFor(name string) string { return name }
 
 // grokBuildWriter：Grok Build TOML 格式（远端类型用 headers 携带自定义头），
 // 写入 config.toml。
-type grokBuildWriter struct{}
+type grokBuildWriter struct{ fileWriterBase }
 
 func (w *grokBuildWriter) prefixRequired() bool { return true }
 
@@ -249,7 +248,7 @@ func (w *grokBuildWriter) entryKeyFor(name string) string { return name }
 
 // openCodeWriter：OpenCode 专属格式（JSON，带 $schema 头，command 为数组、
 // environment 键），写入 mcp.servers 根。
-type openCodeWriter struct{}
+type openCodeWriter struct{ fileWriterBase }
 
 func (w *openCodeWriter) prefixRequired() bool { return true }
 

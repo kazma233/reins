@@ -402,6 +402,45 @@ export function initialApplySelection(
   return { modelIds, defaultModelId, defaultReasoningLevel };
 }
 
+// 应用弹窗确认时的选择状态（原始值，档位规则在 providerApplyInput 内部
+// 派生，弹窗无须理解候选的追加规则）。
+export type ProviderApplySelection = {
+  modelIds: string[];
+  defaultModelId: string;
+  defaultReasoningLevel: ReasoningLevel | null;
+};
+
+// 应用弹窗确认后的应用输入。档位规则与候选规则同居一处：additive 工具
+// 档位跟随工具级设置（弹窗不参与选择）；其余工具候选由
+// reasoningLevelChoices 派生——当前值必被追加进候选（目录收窄不抹已选
+// 档位），因此「候选外不写」的回退只在未选档位时发生。
+export function providerApplyInput(
+  appState: ProviderAppState | undefined,
+  provider: ProviderView,
+  app: ProviderApp,
+  selection: ProviderApplySelection
+): ApplyProviderInput {
+  let defaultReasoningLevel: ReasoningLevel | null = null;
+  if (appState?.additive) {
+    defaultReasoningLevel = appState.appReasoningLevel ?? null;
+  } else {
+    const chosen = selection.defaultReasoningLevel;
+    defaultReasoningLevel =
+      chosen &&
+      appState &&
+      reasoningLevelChoices(appState, provider, selection.modelIds, chosen).includes(chosen)
+        ? chosen
+        : null;
+  }
+  return {
+    providerId: provider.id,
+    app,
+    modelIds: selection.modelIds,
+    defaultModelId: selection.defaultModelId,
+    defaultReasoningLevel,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // 提供商同步（卡片「同步」→ 勾选模型弹窗 → 逐工具应用）
 // ---------------------------------------------------------------------------
@@ -473,6 +512,49 @@ export function providerSyncInput(
         : (modelIds[0] ?? ""),
     defaultReasoningLevel: current.defaultReasoningLevel,
   };
+}
+
+// 同步的三态判定与跳过清单。阻断原因是完整句子，嵌入「工具名（原因）」
+// 行时去掉句尾句号；行格式由同步弹窗与卡片常驻结果共用，不得各写一份。
+export type ProviderSyncTargets = {
+  // 前置条件通过、本次会参与同步的工具。
+  targets: ProviderApp[];
+  // 被阻断工具的「工具名（原因）」清单；无阻断为空。
+  skipLines: string[];
+  // 同步按钮的 hover 提示；空串 = 可同步。
+  buttonTitle: string;
+};
+
+export function providerSyncTargets(apps: ProviderSyncApp[]): ProviderSyncTargets {
+  const targets = apps.filter((item) => item.blockers.length === 0).map((item) => item.app);
+  const skipLines = apps
+    .filter((item) => item.blockers.length > 0)
+    .map(
+      (item) => `${appLabel(item.app)}（${item.blockers.join("").replace(/。+$/, "")}）`
+    );
+  if (apps.length === 0) {
+    return { targets, skipLines, buttonTitle: "尚未应用到任何 Agent。" };
+  }
+  if (targets.length === 0) {
+    return { targets, skipLines, buttonTitle: `无法同步：${skipLines.join("；")}。` };
+  }
+  return { targets, skipLines, buttonTitle: "" };
+}
+
+// 同步结果句：已同步 / 跳过原因 / 逐项失败明细合成一句，常驻在卡片上。
+export function providerSyncResultText(
+  synced: string[],
+  failures: string[],
+  skipLines: string[]
+): string {
+  const parts = [synced.length > 0 ? `已同步到 ${synced.join("、")}` : "没有可同步的 Agent"];
+  if (skipLines.length > 0) {
+    parts.push(`未同步：${skipLines.join("；")}`);
+  }
+  if (failures.length > 0) {
+    parts.push(`失败：${failures.join("；")}`);
+  }
+  return `${parts.join("；")}。`;
 }
 
 // ---------------------------------------------------------------------------

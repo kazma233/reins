@@ -680,6 +680,9 @@ func OpenCodeUsageHours() (*SqlUsageHours, error) {
 	if err != nil {
 		return nil, err
 	}
+	// 函数级句柄用完即关：不关会在每次用量采集时泄漏一条 SQLite 连接
+	// （Windows 下还占住库文件删不掉）。
+	defer cache.Close()
 	contribs, err := opencodeSyncAssistantContribs(connection, cache, dbPath)
 	if err != nil {
 		return nil, err

@@ -14,7 +14,7 @@ func zcodeEngineFixture(t *testing.T, dbDir string, rootID string, childID strin
 	t.Helper()
 	dbPath := filepath.Join(dbDir, "db.sqlite")
 	seedZcodeFamilyAt(t, dbPath, rootID, childID)
-	return NewReaderEngine[ZcodeSessionRow](ZcodeSpec{}, dbPath, tempStore(t))
+	return engineAt(t, ZcodeSpec{}, dbPath, tempStore(t))
 }
 
 func TestZcodeRootSessionAggregatesSubagentSessions(t *testing.T) {

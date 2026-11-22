@@ -315,13 +315,15 @@ func TestSkillInstallOwnDirNormalizationKeepsAliasDistinctFromItsTarget(t *testi
 		t.Fatalf("got %s, want %s", normalizeOwnDir(aliasSkillDir), want)
 	}
 
-	// 对照：穿链接的规范化仍然把两者解析到同一处（内容确实在同一处）。
-	canonicalAlias, err := support.Canonicalize(aliasSkillDir)
+	// 对照：穿链接的解析把两者指到同一处（内容确实在同一处）。Unix 走
+	// 软链接、Windows 走 junction，统一经目录链接读取；support.Canonicalize
+	// 在 Windows 不解析 junction，不能在这里当「穿链接」用。
+	aliasTarget, err := readDirectoryLinkTarget(aliasSkillDir)
 	if err != nil {
-		t.Fatalf("canonicalize: %v", err)
+		t.Fatalf("read link target: %v", err)
 	}
-	if normalizeLinkPath(canonicalAlias) != normalizeLinkPath(ownerSkillDir) {
-		t.Fatal("穿链接的规范化应把两者解析到同一处")
+	if aliasTarget == nil || normalizeLinkPath(*aliasTarget) != normalizeLinkPath(ownerSkillDir) {
+		t.Fatal("穿链接的解析应把两者解析到同一处")
 	}
 }
 

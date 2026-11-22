@@ -5,12 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"sync"
 
 	"reins/internal/logger"
-	"reins/internal/support"
 )
 
 // 持久化目录行缓存（SQLite，对齐 Rust 版 session/rows_cache.rs）。
@@ -46,13 +44,13 @@ type RowsDb struct {
 	db *sql.DB
 }
 
-// RowsDbAtStoreDir：生产路径的库目录（`~/.reins`）。
+// RowsDbAtStoreDir：生产路径的行缓存库（目录经 reinsStoreDir 解析）。
 func RowsDbAtStoreDir() (*RowsDb, error) {
-	home, ok := support.UserHomeDir()
-	if !ok {
-		return nil, fmt.Errorf("Unable to determine home directory")
+	dir, err := reinsStoreDir()
+	if err != nil {
+		return nil, err
 	}
-	return RowsDbAt(filepath.Join(home, ".reins")), nil
+	return RowsDbAt(dir), nil
 }
 
 // RowsDbAt 以显式目录构造（测试与引擎注入用）。

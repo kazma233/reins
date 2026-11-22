@@ -13,7 +13,7 @@ import (
 // dshEngineFixture：env-free 夹具根，engine 直构的 root 就是 sessions 目录。
 func dshEngineFixture(t *testing.T, sessionsRoot string) *ReaderEngine[DshFamilyRow] {
 	t.Helper()
-	return NewReaderEngine[DshFamilyRow](DshSpec{}, sessionsRoot, tempStore(t))
+	return engineAt(t, DshSpec{}, sessionsRoot, tempStore(t))
 }
 
 func TestDshDecodesMultiframeZstdAndPicksHighestGeneration(t *testing.T) {
