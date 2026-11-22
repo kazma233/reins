@@ -1,4 +1,4 @@
-Unicode true
+﻿Unicode true
 
 ####
 ## Please note: Template replacements don't work in this file. They are provided with default defines like
@@ -93,8 +93,9 @@ Section
     
     !insertmacro wails.files
 
+    # 只建开始菜单快捷方式：桌面不放快捷方式（darwin/linux 安装面同样不放
+    # 桌面）；uninstall 侧对 $DESKTOP 的 Delete 保留，清理旧安装留下的残留。
     CreateShortcut "$SMPROGRAMS\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}"
-    CreateShortCut "$DESKTOP\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}"
 
     !insertmacro wails.associateFiles
     !insertmacro wails.associateCustomProtocols
