@@ -35,14 +35,19 @@ const (
 // fetchProviderModelsInner：聚合平台模型列表：GET {base_url}/models。兼容
 // 两种返回形态：{ "data": [ { "id": ... } ] }（OpenAI/Anthropic 官方形态）
 // 与直接数组。
-func fetchProviderModelsInner(provider *ResolvedProvider, apiKey string) (*FetchedModelsResult, error) {
-	// 拉取路径按 base_url 的生态约定逐级回退：
-	// 1. {base}/v1/models —— Anthropic 官方约定（官方、智谱兼容层实测存在）；
-	// 2. {base}/models —— 部分兼容层不挂版本段；
-	// 3. 去掉 /anthropic 子路径后的 /models —— 兼容层普遍挂 /anthropic
-	//    子路径（DeepSeek 文档约定），其 OpenAI 形态模型列表在根路径，
-	//    该跳使用 Bearer 头。仅在 404 / 明确不是模型列表时继续下一候选，
-	//    其他失败（鉴权等）直接报，避免掩盖真实原因。
+//
+// 拉取路径按 base_url 的生态约定逐级回退：
+//  1. {base}/v1/models —— Anthropic 官方约定（官方、智谱兼容层实测存在）；
+//  2. {base}/models —— 部分兼容层不挂版本段；
+//  3. 去掉 /anthropic 子路径后的 /models —— 兼容层普遍挂 /anthropic
+//     子路径（DeepSeek 文档约定），其 OpenAI 形态模型列表在根路径，
+//     该跳使用 Bearer 头。仅在 404 / 明确不是模型列表时继续下一候选，
+//     其他失败（鉴权等）直接报，避免掩盖真实原因。
+//
+// 每次候选请求都记入 Attempts；全部候选失败时返回 Error 非空的结果而不是
+// error：Wails 的 error 只能带一条字符串，前端失败弹窗要按顺序列举每一跳
+// 实际请求了什么、拿到什么响应。
+func fetchProviderModelsInner(provider *ResolvedProvider, apiKey string) *FetchedModelsResult {
 	base := strings.TrimRight(provider.BaseURL, "/")
 	type candidate struct {
 		url    string
@@ -66,10 +71,15 @@ func fetchProviderModelsInner(provider *ResolvedProvider, apiKey string) (*Fetch
 	}
 
 	client := &http.Client{Timeout: providerModelsTimeout}
+	attempts := make([]FetchModelsAttempt, 0, len(candidates))
+	fail := func(message string) *FetchedModelsResult {
+		return &FetchedModelsResult{Models: []FetchedModel{}, Attempts: attempts, Error: &message}
+	}
 	for index, item := range candidates {
 		request, err := http.NewRequest(http.MethodGet, item.url, nil)
 		if err != nil {
-			return nil, fmt.Errorf("请求模型列表失败：%s", item.url)
+			attempts = append(attempts, FetchModelsAttempt{URL: item.url, Detail: "请求地址无法解析"})
+			return fail(fmt.Sprintf("请求模型列表失败：%s", item.url))
 		}
 		if item.bearer {
 			request.Header.Set("Authorization", "Bearer "+apiKey)
@@ -80,50 +90,95 @@ func fetchProviderModelsInner(provider *ResolvedProvider, apiKey string) (*Fetch
 
 		response, err := client.Do(request)
 		if err != nil {
-			// 传输层失败只保留路径：错误详情可能带出请求头（含 Key）。
-			return nil, fmt.Errorf("请求模型列表失败：%s", item.url)
+			// 传输层错误详情可能带出请求信息（含 Key），只保留粗分类。
+			attempts = append(attempts, FetchModelsAttempt{URL: item.url, Detail: describeTransportFailure(err)})
+			return fail(fmt.Sprintf("请求模型列表失败：%s", item.url))
 		}
 		status := response.StatusCode
-		// 错误响应体可能回显请求内容，只保留状态码，不落响应体。
+		statusText := http.StatusText(status)
+		// 错误响应体可能回显请求内容（含 Key）：只取开头并脱敏后展示，
+		// 日志仍只记状态码，不落响应体。
 		if status < 200 || status >= 300 {
+			detail := describeBodyHead(readBodyHead(response), apiKey)
+			_ = response.Body.Close()
 			hasNext := index+1 < len(candidates)
 			logger.Info(fmt.Sprintf("fetch_models candidate failed url=%s status=%d try_next=%t", item.url, status, hasNext))
-			_ = response.Body.Close()
+			attempts = append(attempts, FetchModelsAttempt{URL: item.url, Status: status, StatusText: statusText, Detail: detail})
 			// 仅资源不存在时尝试下一个候选路径。
 			if status == http.StatusNotFound && hasNext {
 				continue
 			}
-			return nil, fmt.Errorf("模型列表请求失败：HTTP %d %s", status, http.StatusText(status))
+			return fail(fmt.Sprintf("模型列表请求失败：HTTP %d %s", status, statusText))
 		}
 		// 先取原始字节再解析：2xx 但不是 JSON 时要把响应体开头带出来，
 		// 否则只报「不是 JSON」看不出网关到底回了什么（HTML 错误页 / 纯文本
-		// 404）。4xx/5xx 仍然不落响应体，那条路径可能回显请求头里的 Key。
+		// 404）。
 		var raw []byte
 		raw, err = readAll(response)
 		_ = response.Body.Close()
 		if err != nil {
-			return nil, fmt.Errorf("读取模型列表响应失败：%s", item.url)
+			attempts = append(attempts, FetchModelsAttempt{
+				URL: item.url, Status: status, StatusText: statusText, Detail: "读取响应失败",
+			})
+			return fail(fmt.Sprintf("读取模型列表响应失败：%s", item.url))
 		}
+		detail := describeBodyHead(raw, apiKey)
 		body, decodeErr := support.DecodeJSONStrict(string(raw))
 		if decodeErr != nil {
-			return nil, fmt.Errorf("模型列表返回的不是 JSON：%s：%s", item.url, describeNonJSONBody(raw))
+			attempts = append(attempts, FetchModelsAttempt{
+				URL: item.url, Status: status, StatusText: statusText, Detail: detail,
+			})
+			return fail(fmt.Sprintf("模型列表返回的不是 JSON：%s：%s", item.url, detail))
 		}
 		models, payloadErr := parseModelsPayload(body)
 		if payloadErr == nil {
-			return &FetchedModelsResult{URL: item.url, Models: models}, nil
+			attempts = append(attempts, FetchModelsAttempt{
+				URL: item.url, Status: status, StatusText: statusText,
+				Detail: fmt.Sprintf("返回 %d 个模型", len(models)),
+			})
+			return &FetchedModelsResult{URL: item.url, Models: models, Attempts: attempts}
 		}
 		// 部分网关把 404 包在 HTTP 200 body 里（如智谱
 		// {"code":500,"msg":"404 NOT_FOUND"}），同样视为候选路径
 		// 不存在，继续尝试下一跳；其余解析错误直接返回。
 		hasNext := index+1 < len(candidates)
 		logger.Info(fmt.Sprintf("fetch_models candidate not a model list url=%s try_next=%t", item.url, hasNext))
+		if payloadErr.missingData {
+			// 上游错误文本可能回显请求头里的 Key，展示前统一脱敏。
+			payloadErr.detail = maskSecret(payloadErr.detail, apiKey)
+		}
+		attemptDetail := payloadErr.detail
+		if attemptDetail == "" {
+			attemptDetail = "无法识别为模型列表"
+		}
+		attempts = append(attempts, FetchModelsAttempt{
+			URL: item.url, Status: status, StatusText: statusText, Detail: attemptDetail,
+		})
 		if payloadErr.missingData && hasNext {
 			continue
 		}
-		return nil, payloadErr
+		return fail(payloadErr.Error())
 	}
 	// 候选路径列表非空，循环内必然返回。
-	return nil, errors.New("unreachable")
+	return fail("拉取模型列表失败。")
+}
+
+// readBodyHead：非 2xx 响应体只取开头用于就地展示。响应体可能很大，也可能
+// 回显请求头；读取结果只进展示摘要，绝不落日志。
+func readBodyHead(response *http.Response) []byte {
+	const limit = 4096
+	raw, _ := io.ReadAll(io.LimitReader(response.Body, limit))
+	return raw
+}
+
+// describeTransportFailure：传输层失败没有响应可展示，只给粗分类；原始错误
+// 可能带出请求信息（含 Key），不进入展示串。
+func describeTransportFailure(err error) string {
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return "未收到响应：请求超时"
+	}
+	return "未收到响应：连接失败"
 }
 
 func readAll(response *http.Response) ([]byte, error) {
@@ -251,11 +306,12 @@ func describeUpstreamError(object map[string]any) string {
 	return strings.Join(parts, "，")
 }
 
-// describeNonJSONBody：非 JSON 响应体的展示形态：压成单行并截断到 1000
-// 字符，足够看清网关返回了什么，又不会把整页内容塞进错误串。
-func describeNonJSONBody(raw []byte) string {
+// describeBodyHead：响应体的展示形态：单行化并截断到 1000 字符，足够看清
+// 网关返回了什么，又不会把整页内容塞进错误串。secret 是本次请求的 API Key：
+// 上游可能把请求头回显进响应体，展示前必须替换成掩码。
+func describeBodyHead(raw []byte, secret string) string {
 	const maxChars = 1000
-	text := string(raw)
+	text := maskSecret(string(raw), secret)
 	flattened := strings.Join(strings.Fields(text), " ")
 	if flattened == "" {
 		return "（响应体为空）"
@@ -265,6 +321,15 @@ func describeNonJSONBody(raw []byte) string {
 		return string(runes[:maxChars]) + "…"
 	}
 	return flattened
+}
+
+// maskSecret：展示摘要里把明文 Key 替换成掩码；空 secret 不替换，避免
+// strings.ReplaceAll 的空分隔符插入语义。
+func maskSecret(text string, secret string) string {
+	if secret == "" || !strings.Contains(text, secret) {
+		return text
+	}
+	return strings.ReplaceAll(text, secret, "******")
 }
 
 // ---------------------------------------------------------------------------
@@ -358,7 +423,7 @@ func fetchModelsdev(client *http.Client, url string) (any, error) {
 	}
 	value, err := support.DecodeJSONStrict(string(raw))
 	if err != nil {
-		return nil, fmt.Errorf("models.dev 返回的不是 JSON：%s", describeNonJSONBody(raw))
+		return nil, fmt.Errorf("models.dev 返回的不是 JSON：%s", describeBodyHead(raw, ""))
 	}
 	return value, nil
 }

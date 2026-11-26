@@ -38,7 +38,8 @@ export function FetchModelsdevCatalog(providerID: string, modelID: string, force
 
 /**
  * FetchProviderModelsDirect 对齐 fetch_provider_models_direct（按表单当前值
- * 拉取，不读 providers.yaml）。
+ * 拉取，不读 providers.yaml）。请求失败时返回 Error/Attempts 非空的结果，
+ * error 只用于入参校验。
  */
 export function FetchProviderModelsDirect(protocol: string, baseURL: string, apiKey: string): $CancellablePromise<$models.FetchedModelsResult | null> {
     return $Call.ByID(2822216868, protocol, baseURL, apiKey);

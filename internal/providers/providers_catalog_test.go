@@ -321,11 +321,14 @@ func TestFetchDirectReportsNonJSONBodyHead(t *testing.T) {
 
 	// HTML 错误页：原样带出（单行化后）
 	server := serveBody(t, "<html>\n  <body>404 page not found</body>\n</html>")
-	_, err := fetchProviderModelsDirectInner(ProtocolAnthropicMessages, server.URL, "sk-probe")
-	if err == nil {
-		t.Fatal("应报错")
+	result, err := fetchProviderModelsDirectInner(ProtocolAnthropicMessages, server.URL, "sk-probe")
+	if err != nil {
+		t.Fatalf("请求失败应走返回值：%v", err)
 	}
-	message := err.Error()
+	if result.Error == nil {
+		t.Fatal("应返回错误信息")
+	}
+	message := *result.Error
 	if !strings.Contains(message, server.URL+"/v1/models") {
 		t.Fatalf("错误应带出请求 URL：%s", message)
 	}
@@ -335,16 +338,139 @@ func TestFetchDirectReportsNonJSONBodyHead(t *testing.T) {
 	if strings.Contains(message, "\n") {
 		t.Fatalf("错误串应压成单行：%s", message)
 	}
+	if len(result.Attempts) != 1 || result.Attempts[0].Status != http.StatusOK {
+		t.Fatalf("尝试记录不符：%+v", result.Attempts)
+	}
+	if !strings.Contains(result.Attempts[0].Detail, "404 page not found") {
+		t.Fatalf("尝试记录应带出响应体开头：%+v", result.Attempts[0])
+	}
 
 	// 超长响应体：截断并标记省略（截断阈值 1000 字符）
 	long := "<html>" + strings.Repeat("x", 1200) + "</html>"
 	server = serveBody(t, long)
-	_, err = fetchProviderModelsDirectInner(ProtocolAnthropicMessages, server.URL, "sk-probe")
-	if err == nil {
-		t.Fatal("应报错")
+	result, err = fetchProviderModelsDirectInner(ProtocolAnthropicMessages, server.URL, "sk-probe")
+	if err != nil {
+		t.Fatalf("请求失败应走返回值：%v", err)
 	}
-	if !strings.HasSuffix(err.Error(), "…") {
-		t.Fatalf("超长响应体应截断：%s", err.Error())
+	if result.Error == nil || !strings.HasSuffix(*result.Error, "…") {
+		t.Fatalf("超长响应体应截断：%+v", result.Error)
+	}
+}
+
+// 候选路径全部失败时，Attempts 按请求顺序记录每一跳的 URL 与响应；
+// 响应体里的明文 Key 展示前必须脱敏。
+func TestFetchDirectFailureListsAttemptsAndMasksKey(t *testing.T) {
+	var paths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		switch r.URL.Path {
+		case "/anthropic/v1/models":
+			w.WriteHeader(http.StatusNotFound)
+			fmt.Fprint(w, `{"error":"missing sk-probe"}`)
+		case "/anthropic/models":
+			w.WriteHeader(http.StatusNotFound)
+		default:
+			w.WriteHeader(http.StatusUnauthorized)
+			fmt.Fprint(w, `{"error":"invalid key sk-probe"}`)
+		}
+	}))
+	defer server.Close()
+
+	result, err := fetchProviderModelsDirectInner(ProtocolAnthropicMessages, server.URL+"/anthropic", "sk-probe")
+	if err != nil {
+		t.Fatalf("请求失败应走返回值：%v", err)
+	}
+	if result.Error == nil || !strings.Contains(*result.Error, "HTTP 401 Unauthorized") {
+		t.Fatalf("错误信息应带状态码：%+v", result.Error)
+	}
+	if result.URL != "" || len(result.Models) != 0 {
+		t.Fatalf("失败结果不应带 URL/models：%+v", result)
+	}
+	if len(result.Attempts) != 3 {
+		t.Fatalf("尝试次数：%+v", result.Attempts)
+	}
+	if len(paths) != 3 || paths[0] != "/anthropic/v1/models" || paths[1] != "/anthropic/models" || paths[2] != "/models" {
+		t.Fatalf("请求序列：%v", paths)
+	}
+	wantStatuses := []int{http.StatusNotFound, http.StatusNotFound, http.StatusUnauthorized}
+	for index, attempt := range result.Attempts {
+		if attempt.URL != server.URL+paths[index] {
+			t.Fatalf("第 %d 跳 URL：%s", index+1, attempt.URL)
+		}
+		if attempt.Status != wantStatuses[index] {
+			t.Fatalf("第 %d 跳状态：%d", index+1, attempt.Status)
+		}
+	}
+	if !strings.Contains(result.Attempts[0].StatusText, "Not Found") {
+		t.Fatalf("状态文本：%+v", result.Attempts[0])
+	}
+	if strings.Contains(result.Attempts[2].Detail, "sk-probe") || !strings.Contains(result.Attempts[2].Detail, "******") {
+		t.Fatalf("响应体中的 Key 应脱敏：%+v", result.Attempts[2])
+	}
+	if strings.Contains(*result.Error, "sk-probe") {
+		t.Fatalf("错误串不应带明文 Key：%s", *result.Error)
+	}
+}
+
+// 成功回退也记录完整轨迹：前一跳 404、命中跳 200。
+func TestFetchDirectSuccessKeepsAttemptTrace(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/anthropic/v1/models" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"data":[{"id":"deepseek-chat"}]}`)
+	}))
+	defer server.Close()
+
+	result, err := fetchProviderModelsDirectInner(ProtocolAnthropicMessages, server.URL+"/anthropic", "sk-probe")
+	if err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+	if result.Error != nil {
+		t.Fatalf("成功结果不应带 error：%+v", result.Error)
+	}
+	if len(result.Attempts) != 2 {
+		t.Fatalf("尝试次数：%+v", result.Attempts)
+	}
+	if result.Attempts[0].Status != http.StatusNotFound || result.Attempts[1].Status != http.StatusOK {
+		t.Fatalf("尝试状态：%+v", result.Attempts)
+	}
+	if !strings.Contains(result.Attempts[1].Detail, "1 个模型") {
+		t.Fatalf("命中跳摘要：%+v", result.Attempts[1])
+	}
+}
+
+// 入参校验仍走 error：没有发请求就没有逐跳诊断可列。
+func TestFetchDirectRejectsMissingInput(t *testing.T) {
+	if result, err := fetchProviderModelsDirectInner(ProtocolOpenaiChatCompletions, "https://example.com", " "); err == nil || result != nil {
+		t.Fatalf("缺 Key 应报错：result=%+v err=%v", result, err)
+	}
+	if result, err := fetchProviderModelsDirectInner(ProtocolOpenaiChatCompletions, " ", "sk-probe"); err == nil || result != nil {
+		t.Fatalf("缺 Base URL 应报错：result=%+v err=%v", result, err)
+	}
+}
+
+// 传输层失败没有响应：尝试记录 status=0，只给「未收到响应」的粗分类。
+func TestFetchDirectTransportFailureReportsNoResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	baseURL := server.URL
+	server.Close()
+
+	result, err := fetchProviderModelsDirectInner(ProtocolOpenaiChatCompletions, baseURL, "sk-probe")
+	if err != nil {
+		t.Fatalf("请求失败应走返回值：%v", err)
+	}
+	if result.Error == nil || !strings.Contains(*result.Error, baseURL+"/models") {
+		t.Fatalf("错误信息应带请求 URL：%+v", result.Error)
+	}
+	if len(result.Attempts) != 1 {
+		t.Fatalf("尝试次数：%+v", result.Attempts)
+	}
+	attempt := result.Attempts[0]
+	if attempt.Status != 0 || !strings.Contains(attempt.Detail, "未收到响应") {
+		t.Fatalf("传输层失败记录不符：%+v", attempt)
 	}
 }
 

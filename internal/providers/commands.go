@@ -340,7 +340,8 @@ func removeExternalEntryInner(env *support.Environment, app ProviderApp, entryKe
 
 // FetchProviderModelsDirectInner：按表单当前值拉取模型列表：不读
 // providers.yaml、不写任何持久状态，因此用户改了表单还没保存时，拉取也
-// 按改后的值走。
+// 按改后的值走。请求失败（含候选全部失败）体现在返回结果的 Error/Attempts
+// 上，error 只用于入参校验。
 func fetchProviderModelsDirectInner(protocol ProviderProtocol, baseURL string, apiKey string) (*FetchedModelsResult, error) {
 	if strings.TrimSpace(apiKey) == "" {
 		return nil, fmt.Errorf("请先填写 API Key，再拉取模型列表。")
@@ -356,5 +357,5 @@ func fetchProviderModelsDirectInner(protocol ProviderProtocol, baseURL string, a
 		APIKey:   nil,
 		Models:   nil,
 	}
-	return fetchProviderModelsInner(provider, strings.TrimSpace(apiKey))
+	return fetchProviderModelsInner(provider, strings.TrimSpace(apiKey)), nil
 }

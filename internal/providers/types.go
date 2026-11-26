@@ -360,11 +360,25 @@ type FetchedModel struct {
 	Name *string `json:"name,omitempty"`
 }
 
+// FetchModelsAttempt 是一次候选路径请求的诊断记录：前端失败弹窗按请求
+// 顺序逐条列举，让用户看到实际打了哪些 URI、每一跳拿到什么响应。Status 为
+// 0 表示传输层失败、没有响应；Detail 是响应体开头或错误摘要，展示前已脱敏。
+type FetchModelsAttempt struct {
+	URL        string `json:"url"`
+	Status     int    `json:"status"`
+	StatusText string `json:"statusText,omitempty"`
+	Detail     string `json:"detail,omitempty"`
+}
+
 // FetchedModelsResult.URL 是最终成功的那一个候选路径，前端弹窗展示它以便
-// 确认实际请求打到哪里。
+// 确认实际请求打到哪里。候选全部失败时 Error 非空、URL/Models 为空，
+// Attempts 带出逐跳诊断——Wails 的 error 只能带一条字符串，失败信息要按
+// URI 逐条列举，所以请求失败也走返回值，error 只用于入参校验。
 type FetchedModelsResult struct {
-	URL    string         `json:"url"`
-	Models []FetchedModel `json:"models"`
+	URL      string               `json:"url"`
+	Models   []FetchedModel       `json:"models"`
+	Attempts []FetchModelsAttempt `json:"attempts"`
+	Error    *string              `json:"error,omitempty"`
 }
 
 type ModelsDevMeta struct {

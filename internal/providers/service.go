@@ -75,7 +75,8 @@ func (s *ProvidersService) DeleteProvider(providerID string) (ProviderMutationRe
 }
 
 // FetchProviderModelsDirect 对齐 fetch_provider_models_direct（按表单当前值
-// 拉取，不读 providers.yaml）。
+// 拉取，不读 providers.yaml）。请求失败时返回 Error/Attempts 非空的结果，
+// error 只用于入参校验。
 func (s *ProvidersService) FetchProviderModelsDirect(protocol string, baseURL string, apiKey string) (*FetchedModelsResult, error) {
 	parsedProtocol, err := parseProviderProtocol(protocol)
 	if err != nil {

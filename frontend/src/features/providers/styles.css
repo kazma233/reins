@@ -425,6 +425,50 @@
   cursor: not-allowed;
 }
 
+/* 失败弹窗的逐跳请求清单：数量与响应长度都不可控，随内容增长，超过弹窗
+   高度上限后由外层滚动区统一滚动；URL 是主信息，完整换行不省略。 */
+.providers-attempts {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.providers-attempt-list {
+  list-style: none;
+  margin: 0;
+}
+
+.providers-attempt {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.providers-attempt__url {
+  color: var(--color-ink);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  word-break: break-all;
+}
+
+.providers-attempt__resp {
+  color: var(--color-body);
+  font-size: var(--font-size-sm);
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+/* 拉取弹窗与编辑弹窗同一高度上限：只限最大高度，不设最小高度——模型/
+   诊断清单少时弹窗保持紧凑，多时随内容长高到该上限，超出由 dialog-scroll
+   统一滚动。 */
+.providers-fetch-dialog {
+  max-height: min(88vh, 860px);
+}
+
+.providers-fetch-dialog .providers-fetched-list {
+  max-height: none;
+}
+
 .providers-diff {
   margin: 0;
   padding: 10px 12px;
