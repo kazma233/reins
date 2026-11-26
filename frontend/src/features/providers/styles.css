@@ -85,6 +85,11 @@
   gap: 12px;
 }
 
+/* 模型目录段与上方元数据拉开距离。 */
+.providers-section-header--spaced {
+  margin-top: 18px;
+}
+
 .providers-section-title {
   margin: 0;
   color: var(--color-ink);
@@ -200,6 +205,11 @@
   gap: 8px;
 }
 
+/* 弹窗内的操作行与上方表单项拉开距离。 */
+.providers-card__actions--spaced {
+  margin-top: 12px;
+}
+
 .providers-entry-list {
   display: flex;
   flex-direction: column;
@@ -280,6 +290,11 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+/* 字段跨两列：编辑弹窗的 API Key、模型能力行的思考等级。 */
+.providers-field--span-2 {
+  grid-column: span 2;
 }
 
 .providers-field span {
@@ -369,6 +384,21 @@
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
+}
+
+/* 两列变体：上下文窗口 / 最大输出。 */
+.providers-model-row__grid--pair {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+/* 能力行：图像输入 / 推理能力定宽，思考等级吃掉剩余宽度。 */
+.providers-model-row__grid--capabilities {
+  grid-template-columns: auto auto minmax(0, 1fr);
+}
+
+/* 与上方说明文字拉开距离（新增模型弹窗的元数据段）。 */
+.providers-model-row__grid--spaced {
+  margin-top: 12px;
 }
 
 .providers-check {

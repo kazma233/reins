@@ -294,7 +294,7 @@ function applyModelsDevCompletion(meta: ModelsDevMeta) {
         <small class="providers-field__hint">聚合提供商的 API 根地址，例如 https://openrouter.ai/api/v1。</small>
       </label>
 
-      <label class="providers-field" style="grid-column: span 2">
+      <label class="providers-field providers-field--span-2">
         <span>API Key（可选）</span>
         <AppSecretInput v-model="form.apiKey" :disabled="loading" />
         <small class="providers-field__hint">{{ apiKeyHint }}</small>
@@ -302,7 +302,7 @@ function applyModelsDevCompletion(meta: ModelsDevMeta) {
     </div>
 
     <div v-if="showModels">
-      <div class="providers-section-header" style="margin-top: 18px">
+      <div class="providers-section-header providers-section-header--spaced">
         <h4 class="providers-section-title">模型目录</h4>
         <AppFieldError
           class="providers-field__error"
@@ -377,10 +377,7 @@ function applyModelsDevCompletion(meta: ModelsDevMeta) {
             </label>
           </div>
 
-          <div
-            class="providers-model-row__grid"
-            style="grid-template-columns: repeat(2, minmax(0, 1fr))"
-          >
+          <div class="providers-model-row__grid providers-model-row__grid--pair">
             <label class="providers-field">
               <span>上下文窗口</span>
               <AppInput v-model.number="row.contextWindow" size="sm" type="number" :disabled="loading" />
@@ -391,10 +388,7 @@ function applyModelsDevCompletion(meta: ModelsDevMeta) {
             </label>
           </div>
 
-          <div
-            class="providers-model-row__grid"
-            style="grid-template-columns: auto auto minmax(0, 1fr)"
-          >
+          <div class="providers-model-row__grid providers-model-row__grid--capabilities">
             <div class="providers-field">
               <span>图像输入</span>
               <label class="providers-check">

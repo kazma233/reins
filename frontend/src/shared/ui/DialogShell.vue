@@ -3,7 +3,6 @@
 // 放在 <script setup> 里每个实例各持一份，isTopDialog 对每个实例都为真，
 // 按 Esc 会把所有层级的弹窗一次性全部关闭。
 let openDialogCount = 0;
-let originalBodyOverflow = "";
 const dialogStack: HTMLElement[] = [];
 </script>
 
@@ -78,8 +77,7 @@ watch(
     const previousFocus = isHTMLElement(document.activeElement) ? document.activeElement : null;
 
     if (openDialogCount === 0) {
-      originalBodyOverflow = document.body.style.overflow;
-      document.body.style.overflow = "hidden";
+      document.body.classList.add("dialog-open");
     }
     openDialogCount += 1;
 
@@ -116,7 +114,7 @@ watch(
       }
       openDialogCount = Math.max(0, openDialogCount - 1);
       if (openDialogCount === 0) {
-        document.body.style.overflow = originalBodyOverflow;
+        document.body.classList.remove("dialog-open");
       }
       previousFocus?.focus({ preventScroll: true });
     });

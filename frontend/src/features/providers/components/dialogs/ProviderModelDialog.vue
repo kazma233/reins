@@ -157,7 +157,7 @@ function confirm() {
       </label>
     </div>
 
-    <div class="providers-card__actions" style="margin-top: 12px">
+    <div class="providers-card__actions providers-card__actions--spaced">
       <button
         class="secondary-button"
         :disabled="!providerId.trim() || !draft.id.trim()"
@@ -174,7 +174,7 @@ function confirm() {
       元数据（上下文窗口、最大输出、图像、思考等级）会随应用写入目标工具；缺失时对应工具可能展示能力警告。
     </p>
 
-    <div class="providers-model-row__grid" style="margin-top: 12px">
+    <div class="providers-model-row__grid providers-model-row__grid--spaced">
       <label class="providers-field">
         <span>上下文窗口</span>
         <AppInput v-model.number="draft.contextWindow" size="sm" type="number" />
@@ -193,7 +193,7 @@ function confirm() {
       </div>
     </div>
 
-    <div class="providers-model-row__grid" style="margin-top: 12px">
+    <div class="providers-model-row__grid providers-model-row__grid--spaced">
       <div class="providers-field">
         <AppSelect
           v-model="reasoningValue"
@@ -202,7 +202,7 @@ function confirm() {
           :options="TRI_STATE_OPTIONS"
         />
       </div>
-      <label class="providers-field" style="grid-column: span 2">
+      <label class="providers-field providers-field--span-2">
         <span>思考等级（逗号分隔：off/minimal/low/medium/high/xhigh/max）</span>
         <AppInput
           :model-value="reasoningLevelsText(draft.reasoningLevels)"
