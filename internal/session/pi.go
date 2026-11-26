@@ -72,7 +72,7 @@ func (b *piReaderInstance) current() (*PiReader, error) {
 	if err != nil {
 		return nil, err
 	}
-	reader := newPiReader(root, storeDir)
+	reader := newPiReader(root, piTaskRunsRoot(), storeDir)
 	b.slot = &piSlot{root: root, reader: reader}
 	return reader, nil
 }
@@ -82,6 +82,9 @@ func (b *piReaderInstance) current() (*PiReader, error) {
 // （内存 → SQLite → 整文件解析三级回填）。
 type PiReader struct {
 	sessionsRoot string
+	// taskRunsRoot：subagent-tasks 跟 agent 根走，可能被 sessionDir 配置
+	// 重定向到 sessions 根之外，所以两个根分开注入。
+	taskRunsRoot string
 	timeline     *DualHalfCache
 	mu           sync.Mutex
 	cachedIndex  *piCachedIndex
@@ -159,12 +162,14 @@ type piEntry struct {
 	value     any
 }
 
-// newPiReader：reader 级测试的直构入口（root 与持久缓存目录都由参数注入，
-// 脱离进程 env）——与引擎系的 NewReaderEngine(spec, root, storeDir) 同待遇；
-// 生产路径经 piReaderInstance.current 注入 HOME 解析的库目录。
-func newPiReader(sessionsRoot string, storeDir string) *PiReader {
+// newPiReader：reader 级测试的直构入口（sessions 根、subagent-tasks 根与
+// 持久缓存目录都由参数注入，脱离进程 env）——与引擎系的
+// NewReaderEngine(spec, root, storeDir) 同待遇；生产路径经
+// piReaderInstance.current 注入 HOME 解析的三个根。
+func newPiReader(sessionsRoot string, taskRunsRoot string, storeDir string) *PiReader {
 	return &PiReader{
 		sessionsRoot: sessionsRoot,
+		taskRunsRoot: taskRunsRoot,
 		timeline:     NewDualHalfCache("Pi timeline"),
 		summaries:    NewSummaryMemCache(SourcePi, "Pi summary", SummaryDbAt(storeDir)),
 	}
@@ -188,7 +193,7 @@ func (r *PiReader) familyIndex() (FamilyIndex[piRow], error) {
 	files := support.EnumerateJSONLFiles(r.sessionsRoot)
 	fingerprintFiles := make([]string, len(files))
 	copy(fingerprintFiles, files)
-	taskRuns, err := piScanTaskRuns(piTaskRunsRoot(), &fingerprintFiles)
+	taskRuns, err := piScanTaskRuns(r.taskRunsRoot, &fingerprintFiles)
 	if err != nil {
 		return FamilyIndex[piRow]{}, err
 	}
@@ -206,12 +211,20 @@ func (r *PiReader) familyIndex() (FamilyIndex[piRow], error) {
 	r.mu.Unlock()
 
 	rows := make([]piRow, 0)
+	sessionIDs := make(map[string]bool, len(files))
 	for _, path := range files {
 		if row, ok := piScanRow(path); ok {
 			rows = append(rows, row)
+			sessionIDs[row.id] = true
 		}
 	}
-	rows = append(rows, taskRuns...)
+	// 父会话已删（或不在当前根）的 run 不独立成条目；数据仍在磁盘，
+	// 父会话重新出现时会自动归族。
+	for _, run := range taskRuns {
+		if run.parentSessionID != nil && sessionIDs[*run.parentSessionID] {
+			rows = append(rows, run)
+		}
+	}
 	index := piBuildFamilyIndex(rows)
 
 	r.mu.Lock()
@@ -486,6 +499,9 @@ func piTaskRunsRoot() string {
 // 它不是会话文件，不能独立成条目——父缺失（已删）的 run 直接跳过，数据仍
 // 在磁盘。
 func piScanTaskRuns(agentRoot string, fingerprintFiles *[]string) ([]piRow, error) {
+	if agentRoot == "" {
+		return []piRow{}, nil
+	}
 	tasksDir := filepath.Join(agentRoot, "subagent-tasks")
 	entries, err := os.ReadDir(tasksDir)
 	if err != nil {

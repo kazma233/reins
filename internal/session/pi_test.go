@@ -1169,11 +1169,42 @@ func TestPiFoldsSubagentTaskRunsIntoTheParentFamily(t *testing.T) {
 	}
 }
 
+// 父会话已删（或不在当前根）的 subagent-tasks run 不独立成条目；数据仍在
+// 磁盘，父会话重新出现时自动归族。
+func TestPiSkipsOrphanSubagentTaskRuns(t *testing.T) {
+	root := t.TempDir()
+	agentRoot := t.TempDir()
+	store := tempStore(t)
+	path := filepath.Join(root, "2026-10-23T02-44-12-987Z_pi-orphan-main.jsonl")
+	writeJSONLFile(t, path, jsonlLines(t,
+		piHeaderLine("pi-orphan-main", "/tmp/pi-project", "2026-10-23T02:44:12.987Z"),
+		piEntryLine("message", "orphan-user", nil, "2026-10-23T02:44:13.000Z", `"message": {"role": "user", "content": "main question"}`),
+	))
+
+	taskDir := filepath.Join(agentRoot, "subagent-tasks", "orphan-run")
+	writeJSONLFile(t, filepath.Join(taskDir, "output.jsonl"), jsonlLines(t,
+		`{"type": "message_end", "message": {"role": "assistant", "content": [{"type": "text", "text": "orphan answer"}], "timestamp": 1792724595685}}`,
+	))
+	writeJSONLRaw(t, filepath.Join(taskDir, "task.json"),
+		`{"version": 1, "id": "orphan-run", "status": "completed", "agent": "scout", "sessionId": "pi-deleted-parent", "createdAt": 1792724375849}`)
+
+	r := newPiReader(root, agentRoot, store)
+	defer r.Close()
+	index, err := r.familyIndex()
+	if err != nil {
+		t.Fatalf("family index: %v", err)
+	}
+	if len(index.Families) != 1 || index.Families[0].Root.id != "pi-orphan-main" {
+		t.Fatalf("families = %+v, want one pi-orphan-main", index.Families)
+	}
+}
+
 // —— 小件 ——
 
-// 直构接缝：root 与持久缓存目录都由参数注入，不经 env 重定向即可测试——
-// 与引擎系的 NewReaderEngine(spec, root, storeDir) 同待遇；生产路径仍经
-// piReaderInstance.current 解析 HOME（由 readerMust 系测试覆盖）。
+// 直构接缝：sessions 根、subagent-tasks 根与持久缓存目录都由参数注入，
+// 不经 env 重定向即可测试——与引擎系的 NewReaderEngine(spec, root, storeDir)
+// 同待遇；生产路径仍经 piReaderInstance.current 解析 HOME（由 readerMust
+// 系测试覆盖）。
 func TestPiReaderDirectConstructionInjectsRootAndStoreDir(t *testing.T) {
 	root := t.TempDir()
 	store := tempStore(t)
@@ -1184,7 +1215,7 @@ func TestPiReaderDirectConstructionInjectsRootAndStoreDir(t *testing.T) {
 		piEntryLine("message", "assistant-1", str("user-1"), "2026-11-22T10:00:02.000Z", `"message": {"role": "assistant", "content": [{"type": "text", "text": "direct answer"}]}`),
 	))
 
-	r := newPiReader(root, store)
+	r := newPiReader(root, t.TempDir(), store)
 	defer r.Close()
 
 	// 与 piReaderInstance.ListEntries/ParseSummary 同一条部件链（实例层只是
