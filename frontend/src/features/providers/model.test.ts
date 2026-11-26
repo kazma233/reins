@@ -459,7 +459,7 @@ describe("toolLevelOptions and toolLevelText", () => {
 
   it("describes the unset tool level as keep-as-is", () => {
     const additive = appState({ additive: true });
-    expect(toolLevelText(additive)).toContain("不改各模型的档位");
+    expect(toolLevelText(additive)).toContain("不写默认档");
   });
 
   it("describes the configured tool level with its write value", () => {
@@ -469,6 +469,7 @@ describe("toolLevelOptions and toolLevelText", () => {
       reasoningLevelWrites: [{ level: ReasoningLevel.ReasoningMax, writes: "max" }],
     });
     expect(toolLevelText(additive)).toContain("最高（max）");
+    expect(toolLevelText(additive)).toContain("默认模型");
     expect(toolLevelText(additive)).toContain("Agent 页");
   });
 

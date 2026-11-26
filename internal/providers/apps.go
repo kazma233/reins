@@ -128,7 +128,8 @@ type AppAdapter interface {
 
 	// ReasoningDialect：本工具的思考档位方言。apply 写入、inspect 反读、
 	// 弹窗映射文案全部从这张表派生（特殊映射在表内声明，如 Grok
-	// max→xhigh、pi-ai off→off），正反互逆由 roundtrip 测试守卫。
+	// off→none、zcode off→disabled、pi-ai off→off），正反互逆由 roundtrip
+	// 测试守卫。
 	ReasoningDialect() *ReasoningDialect
 
 	// ProtocolDialect：本工具的协议方言；配置文件里没有协议字段、语义
@@ -218,6 +219,13 @@ func ProtocolLabel(protocol ProviderProtocol) string {
 	return ""
 }
 
+// DefaultReasoningLevelValidator：需要按模型菜单校验默认档的适配器实现。
+// ValidatePlan 在通用能力校验后调用；Grok 的 reasoning_efforts 菜单只接受
+// 菜单内的档位，写盘前必须按默认模型再校验一次。
+type DefaultReasoningLevelValidator interface {
+	ValidateDefaultReasoningLevel(provider *ResolvedProvider, plan *ApplyProviderInput) error
+}
+
 // ValidatePlan：应用前置校验——模型选择合法 + 必填元数据齐全；返回能力
 // 警告（不阻断）。
 func ValidatePlan(adapter AppAdapter, provider *ResolvedProvider, plan *ApplyProviderInput) ([]string, error) {
@@ -255,6 +263,11 @@ func ValidatePlan(adapter AppAdapter, provider *ResolvedProvider, plan *ApplyPro
 		if !supported {
 			return nil, fmt.Errorf("%s 不支持思考等级 %s。",
 				ProviderAppLabel(adapter.ID()), plan.DefaultReasoningLevel.WriteForm())
+		}
+	}
+	if validator, ok := adapter.(DefaultReasoningLevelValidator); ok {
+		if err := validator.ValidateDefaultReasoningLevel(provider, plan); err != nil {
+			return nil, err
 		}
 	}
 

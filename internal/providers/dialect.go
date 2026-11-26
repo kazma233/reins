@@ -13,19 +13,11 @@ type ReasoningDialect struct {
 	// 档位（validatePlan 前置校验），表按需覆盖；查表缺失属静态数据 bug，
 	// panic 大声失败。
 	Spells []ReasoningSpell
-	// lossy：写入折叠声明：档位在该工具里折叠成另一档的拼写写入（grok 的
-	// max→xhigh），反向不闭合；roundtrip 测试按此豁免（因此仅测试读取）。
-	Lossy []ReasoningFold
 }
 
 type ReasoningSpell struct {
 	Level ReasoningLevel
 	Spell string
-}
-
-type ReasoningFold struct {
-	From ReasoningLevel
-	To   ReasoningLevel
 }
 
 // Spell：查表拼写。缺失属静态数据 bug（方言表与能力表脱钩），panic 暴露。
@@ -38,19 +30,9 @@ func (d *ReasoningDialect) Spell(level ReasoningLevel) string {
 	panic("方言表必须覆盖该档位")
 }
 
-// fold 返回档位的写入折叠目标；无折叠声明返回 false。
-func (d *ReasoningDialect) fold(level ReasoningLevel) (ReasoningLevel, bool) {
-	for _, entry := range d.Lossy {
-		if entry.From == level {
-			return entry.To, true
-		}
-	}
-	return level, false
-}
-
-// Parse 反读：先按工具拼写认档（覆盖 grok 配置层合法但 Reins 不写出的
-// "max" 等取值），认不出回落 ReasoningLevel.Parse 的归一口径（trim + 小写，
-// best-effort）；两处都认不出的取值留空展示、不报错。
+// Parse 反读：先按工具拼写认档（方言表覆盖工具支持的全部拼写，含 Reins
+// 不主动产出的历史取值），认不出回落 ReasoningLevel.Parse 的归一口径
+// （trim + 小写，best-effort）；两处都认不出的取值留空展示、不报错。
 func (d *ReasoningDialect) Parse(value string) (ReasoningLevel, bool) {
 	normalized := strings.ToLower(strings.TrimSpace(value))
 	for _, entry := range d.Spells {
@@ -158,10 +140,11 @@ var grokProtocol = &ProtocolDialect{
 	},
 }
 
-// grokReasoning：Grok 的 default_reasoning_effort 配置层接受 max，但交互 UI
-// 只渲染 low/medium/high/xhigh 四档，且 messages 后端请求层 max 与 xhigh 的
-// thinking 参数完全相同（1.0.41 实测）；映射后弹窗所选档位在 Grok 界面
-// 可见、请求等价。
+// grokReasoning：Grok 的 config.toml / 模型菜单都只认
+// none/minimal/low/medium/high/xhigh/max 七个值（1.0.92 实测：off、x-high、
+// 带空格的写法都会让整个 reasoning_efforts 数组静默失效）。max 不再折叠成
+// xhigh：模型菜单声明 max 时它就是独立档位；只有模型没有等级元数据、退回
+// Grok 旧式默认菜单（low/medium/high/xhigh）时才由 apply 折算成 xhigh。
 var grokReasoning = &ReasoningDialect{
 	Spells: []ReasoningSpell{
 		{ReasoningOff, "none"},
@@ -170,9 +153,8 @@ var grokReasoning = &ReasoningDialect{
 		{ReasoningMedium, "medium"},
 		{ReasoningHigh, "high"},
 		{ReasoningXhigh, "xhigh"},
-		{ReasoningMax, "xhigh"},
+		{ReasoningMax, "max"},
 	},
-	Lossy: []ReasoningFold{{ReasoningMax, ReasoningXhigh}},
 }
 
 // codexProtocol：codex 的 wire_api 目前只有 responses 一种取值

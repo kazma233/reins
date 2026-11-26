@@ -358,19 +358,21 @@ export function toolLevelOptions(
 }
 
 // additive 应用弹窗的档位只读文案：档位跟随工具级默认设置，不在弹窗里选。
+// 默认档只作用于默认模型；各模型自己可选的档位由工具侧菜单/等级集决定，
+// 文案不能写成「所有勾选模型」（Grok 的 reasoning_efforts 是每模型一份）。
 export function toolLevelText(appState: ProviderAppState): string {
   if ((appState.supportedReasoningLevels ?? []).length === 0) {
     return "该工具不写入思考档位。";
   }
   const level = appState.appReasoningLevel;
   if (!level) {
-    return "该工具未设置默认思考等级，本次应用不改各模型的档位（保留现状）。可在 Agent 页的工具卡片上设置。";
+    return "该工具未设置默认思考等级，本次应用不写默认档（保留现状）。可在 Agent 页的工具卡片上设置。";
   }
   const writes = reasoningEffortWrite(appState, level);
   const label = `${REASONING_LEVEL_LABELS[level]}（${level}）`;
   return writes === level
-    ? `将按工具默认档「${label}」写入所有勾选模型；档位在 Agent 页的工具卡片上设置。`
-    : `将按工具默认档「${REASONING_LEVEL_LABELS[level]}（${level}，写入 ${writes}）」写入所有勾选模型；档位在 Agent 页的工具卡片上设置。`;
+    ? `将按工具默认档「${label}」写入默认模型；各模型的可选档位由各自菜单决定。档位在 Agent 页的工具卡片上设置。`
+    : `将按工具默认档「${REASONING_LEVEL_LABELS[level]}（${level}，写入 ${writes}）」写入默认模型；各模型的可选档位由各自菜单决定。档位在 Agent 页的工具卡片上设置。`;
 }
 
 // 应用弹窗的初始选择：优先沿用该平台已写入的模型，并以当前默认模型为

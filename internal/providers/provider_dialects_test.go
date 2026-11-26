@@ -13,21 +13,14 @@ func dialectTestApps() []ProviderApp {
 	return agents.ProviderApps()
 }
 
-// 支持档位的拼写能反读回原档位；有损折叠（grok max→xhigh）按声明豁免。
+// 支持档位的拼写能反读回原档位。
 func TestReasoningDialectRoundtrip(t *testing.T) {
 	for _, app := range dialectTestApps() {
 		adapter := AdapterFor(app)
 		dialect := adapter.ReasoningDialect()
 		for _, level := range adapter.Capability().SupportedReasoningLevels {
 			spelled := dialect.Spell(level)
-			expected := level
-			for _, fold := range dialect.Lossy {
-				if fold.From == level {
-					expected = fold.To
-					break
-				}
-			}
-			if parsed, ok := dialect.Parse(spelled); !ok || parsed != expected {
+			if parsed, ok := dialect.Parse(spelled); !ok || parsed != level {
 				t.Fatalf("%s 档位 %s 拼写 %s 反读不闭合：%v %s", app, level, spelled, ok, parsed)
 			}
 		}

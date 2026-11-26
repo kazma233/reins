@@ -147,13 +147,17 @@ func (a *GrokbuildAdapter) Capability() AppCapability {
 		SupportedProtocols:  AllProtocols(),
 		Additive:            true,
 		RequiredModelFields: nil,
-		// Grok 有 context_window 与 supports_reasoning_effort 落点；
-		// 最大输出（max_completion_tokens 属采样上限，Reins 不写）与
-		// 图像输入（配置无对应字段）无落点。
+		// Grok 有 context_window 与 reasoning_efforts 菜单落点；最大输出
+		// （max_completion_tokens 属采样上限，Reins 不写）与图像输入
+		// （配置无对应字段）无落点。
 		UnwrittenModelFields:     []ModelField{FieldMaxOutputTokens, FieldSupportsImages},
 		SupportedReasoningLevels: AllReasoningLevels(),
 		BehaviorNotes: []string{
-			"选择最高（max）档时实际以 xhigh 落盘：Grok 交互界面只渲染到 xhigh，两档的 thinking 参数完全相同（1.0.41 实测）。",
+			"Grok 的思考档位是每个模型一份菜单：Reins 按模型声明的思考等级写 reasoning_efforts；模型未声明等级时沿用 Grok 默认菜单（low/medium/high/xhigh，端点自报菜单时以端点为准）。",
+			"每个菜单会标一个默认项：默认模型优先用工具默认档，其余模型取 high（未声明 high 时取最高档）；否则 Grok 会退回菜单第一项，按枚举序可能是「无」。",
+			"默认思考等级只作用于默认模型，且必须是该模型菜单中的一档；不在菜单内时会拒绝应用（Grok 的 /effort 与 --effort 也只接受菜单内的档位）。",
+			"「最高（max）」只在模型菜单声明 max 时按 max 写入；模型未声明等级时折算为 xhigh（Grok 旧式默认菜单没有 max）。",
+			"关闭档写作 none（Grok 不接受 off）；声明为不推理的模型写 supports_reasoning_effort = false，避免继承内置同名模型（grok-4.5/4.6）的菜单。",
 			"Anthropic Messages 协议下 Grok 固定请求 {Base URL}/messages，不自动补 /v1 段。",
 		},
 	}
@@ -181,8 +185,8 @@ func (a *GrokbuildAdapter) Inspect(env *support.Environment, providers map[strin
 	if err != nil {
 		return nil, err
 	}
-	// 应用弹窗据此预选；反读值只用于回显，不参与漂移判定。写入时 max
-	// 已折算成 xhigh，反读同样是 xhigh，两边写入值等价。
+	// 应用弹窗据此预选；反读值只用于回显，不参与漂移判定。模型有菜单时
+	// max 原样写盘；没有等级元数据时折算 xhigh，反读也就是 xhigh。
 	if modelsTable, ok := tomlTable(tomlGet(root, "models")); ok {
 		if effort, ok := nodeAsTOMLStr(tomlGet(modelsTable, "default_reasoning_effort")); ok {
 			if level, ok := grokReasoning.Parse(effort); ok {
@@ -345,11 +349,24 @@ func (a *GrokbuildAdapter) Apply(env *support.Environment, provider *ResolvedPro
 		if model.ContextWindow != nil {
 			entry["context_window"] = *model.ContextWindow
 		}
-		// 未声明支持的模型会被 grok 判为不支持思考等级并丢弃配置档位
-		//（1.0.41 实测 WARN：model does not support effort; ignoring it），
-		// 官方字段 supports_reasoning_effort 是 [models].default_reasoning_effort
-		// 生效的前提。
-		if model.Reasoning != nil && *model.Reasoning {
+		// 思考档位菜单：Grok 1.0.92 起每个模型一份 reasoning_efforts 菜单，
+		// 值域固定为 none/minimal/low/medium/high/xhigh/max；数组里任意一项
+		// 非法（含未知 value）会让整个菜单静默失效，所以只按模型声明的等级
+		// 写，不猜。未声明等级的推理模型保留旧式 supports_reasoning_effort，
+		// 让 Grok 从端点 /v1/models 或内置默认菜单取档位；显式不推理的模型
+		// 写 false，阻断与内置同名模型（grok-4.5/4.6）的菜单继承。
+		switch {
+		case model.Reasoning != nil && !*model.Reasoning:
+			entry["supports_reasoning_effort"] = false
+		case len(model.ReasoningLevels) > 0:
+			// 菜单默认项只对默认模型跟随工具默认档；其余模型取 high/最高档，
+			// 否则 Grok 会退回菜单第一项（可能是 none）。
+			var preferred *ReasoningLevel
+			if modelID == plan.DefaultModelID {
+				preferred = plan.DefaultReasoningLevel
+			}
+			entry["reasoning_efforts"] = grokReasoningEfforts(model.ReasoningLevels, preferred)
+		case model.Reasoning != nil && *model.Reasoning:
 			entry["supports_reasoning_effort"] = true
 		}
 		if provider.Protocol == ProtocolAnthropicMessages {
@@ -379,7 +396,8 @@ func (a *GrokbuildAdapter) Apply(env *support.Environment, provider *ResolvedPro
 	}
 	modelsSection["default"] = modelEntryKey(registration, plan.DefaultModelID)
 	if plan.DefaultReasoningLevel != nil {
-		modelsSection["default_reasoning_effort"] = grokReasoning.Spell(*plan.DefaultReasoningLevel)
+		modelsSection["default_reasoning_effort"] = grokDefaultEffort(
+			findModel(provider, plan.DefaultModelID), *plan.DefaultReasoningLevel)
 	}
 
 	content, err := serializeTOML(rootTable)
@@ -387,6 +405,97 @@ func (a *GrokbuildAdapter) Apply(env *support.Environment, provider *ResolvedPro
 		return nil, err
 	}
 	return []FileOutput{{Path: path, Content: content}}, nil
+}
+
+// grokReasoningEfforts：把模型声明的等级写成 Grok 的 reasoning_efforts 数组。
+// value 是唯一必填字段，label/description 省略时 Grok 按档位自动补；数组里
+// 任意一项非法都会让整个菜单静默失效，来源等级已在 providers.yaml 反序列化
+// 期经过枚举校验，不会产出非法 value。必须标一个 default 项：没有 default
+// 时 Grok 取数组第一项，按枚举序可能是 none。
+func grokReasoningEfforts(levels []ReasoningLevel, preferred *ReasoningLevel) []map[string]any {
+	defaultLevel, hasDefault := grokMenuDefault(levels, preferred)
+	efforts := make([]map[string]any, 0, len(levels))
+	for _, level := range levels {
+		item := map[string]any{"value": grokReasoning.Spell(level)}
+		if hasDefault && level == defaultLevel {
+			item["default"] = true
+		}
+		efforts = append(efforts, item)
+	}
+	return efforts
+}
+
+// grokMenuDefault：菜单的 default 项。工具默认档在模型声明范围内时优先用它
+// （只有默认模型会传入）；否则取 high（Grok 内置菜单的默认档），模型没有
+// high 时取声明的最高档。
+func grokMenuDefault(levels []ReasoningLevel, preferred *ReasoningLevel) (ReasoningLevel, bool) {
+	if len(levels) == 0 {
+		return "", false
+	}
+	if preferred != nil {
+		for _, level := range levels {
+			if level == *preferred {
+				return level, true
+			}
+		}
+	}
+	for _, level := range levels {
+		if level == ReasoningHigh {
+			return ReasoningHigh, true
+		}
+	}
+	highest := levels[0]
+	for _, level := range levels[1:] {
+		if reasoningRank(level) > reasoningRank(highest) {
+			highest = level
+		}
+	}
+	return highest, true
+}
+
+// grokDefaultEffort：默认档的写入值。模型有自己的菜单时按菜单值写（max 是
+// 独立档位）；没有等级元数据时退回 Grok 旧式默认菜单
+// （low/medium/high/xhigh），该菜单没有 max，只能写旧式最高档 xhigh。
+func grokDefaultEffort(model *ProviderModelRecord, level ReasoningLevel) string {
+	if model != nil && len(model.ReasoningLevels) > 0 {
+		return grokReasoning.Spell(level)
+	}
+	if level == ReasoningMax {
+		return grokReasoning.Spell(ReasoningXhigh)
+	}
+	return grokReasoning.Spell(level)
+}
+
+// ValidateDefaultReasoningLevel：默认档写进 [models].default_reasoning_effort，
+// 只作用于默认模型；Grok 的 /effort 与 --effort 只接受当前模型菜单内的档位
+// （1.0.92 实测 error: unknown effort level ... use one of），所以默认模型
+// 声明了等级集时必须在写盘前校验。模型没有等级元数据时菜单由端点或内置
+// 默认决定，Reins 无从判断，保持旧式兜底不阻断。
+func (a *GrokbuildAdapter) ValidateDefaultReasoningLevel(provider *ResolvedProvider, plan *ApplyProviderInput) error {
+	if plan.DefaultReasoningLevel == nil {
+		return nil
+	}
+	model := findModel(provider, plan.DefaultModelID)
+	if model == nil {
+		return nil
+	}
+	if model.Reasoning != nil && !*model.Reasoning {
+		return fmt.Errorf("默认模型 %s 声明为不支持思考等级，不能设置默认思考等级。", model.ID)
+	}
+	if len(model.ReasoningLevels) == 0 {
+		return nil
+	}
+	for _, level := range model.ReasoningLevels {
+		if level == *plan.DefaultReasoningLevel {
+			return nil
+		}
+	}
+	allowed := make([]string, 0, len(model.ReasoningLevels))
+	for _, level := range model.ReasoningLevels {
+		allowed = append(allowed, grokReasoning.Spell(level))
+	}
+	return fmt.Errorf("默认思考等级 %s 不在模型 %s 的菜单内（可选：%s）。",
+		grokReasoning.Spell(*plan.DefaultReasoningLevel), model.ID, strings.Join(allowed, "、"))
 }
 
 func (a *GrokbuildAdapter) Remove(env *support.Environment, providerID string, provider *ResolvedProvider) ([]FileOutput, error) {

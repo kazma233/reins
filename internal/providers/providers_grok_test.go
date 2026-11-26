@@ -100,21 +100,9 @@ func TestGrokReapplySwitchesDefaultAndKeepsOtherProvider(t *testing.T) {
 	}
 }
 
-// 选「最高 (max)」写出 xhigh：Grok UI 最高档是 xhigh 且请求层两者等价。
-func TestGrokMaxReasoningWritesXhigh(t *testing.T) {
-	home := newIsolated(t)
-	home.seedModel(t, "p1", "model-a")
-	home.apply(t, "p1", agentsGrokbuild, []string{"model-a"}, "model-a", levelPtr(ReasoningMax))
-	if content := mustRead(t, mustGrokConfigPath(t, home.env)); !strings.Contains(content, `default_reasoning_effort = "xhigh"`) {
-		t.Fatalf("max 应折算成 xhigh 落盘：\n%s", content)
-	}
-}
-
-// 模型元数据齐全时逐模型写 context_window 与 supports_reasoning_effort：
-// 缺 context_window 时 grok 按 200000 兜底计算自动压缩时机；未声明
-// supports_reasoning_effort 的模型会被判为不支持思考等级，[models] 里写的
-// default_reasoning_effort 被静默丢弃（grok 1.0.41 debug 日志实测）。
-func TestGrokApplyWritesContextWindowAndReasoningSupport(t *testing.T) {
+// 模型声明了思考等级时按等级写 reasoning_efforts 菜单（Grok 1.0.92 的菜单
+// 来源），不再写旧的 supports_reasoning_effort；context_window 继续按元数据写。
+func TestGrokApplyWritesReasoningMenuFromModelLevels(t *testing.T) {
 	home := newIsolated(t)
 	home.seedModel(t, "p1", "model-a")
 
@@ -122,13 +110,20 @@ func TestGrokApplyWritesContextWindowAndReasoningSupport(t *testing.T) {
 	content := mustRead(t, mustGrokConfigPath(t, home.env))
 	for _, expected := range []string{
 		"context_window = 200000",
-		"supports_reasoning_effort = true",
+		"reasoning_efforts",
 		`default_reasoning_effort = "high"`,
 	} {
 		if !strings.Contains(content, expected) {
 			t.Fatalf("config.toml 缺少 %s：\n%s", expected, content)
 		}
 	}
+	if strings.Contains(content, "supports_reasoning_effort") {
+		t.Fatalf("有菜单时不应再写旧字段：\n%s", content)
+	}
+	root := mustTOML(t, content)
+	assertGrokMenu(t, root, "reins-p1--model-a", "low", "medium", "high")
+	assertGrokMenuDefault(t, root, "reins-p1--model-a", "high")
+
 	// 新增字段不影响反读归类。
 	state := home.state(t)
 	grok := findAppState(t, state, agentsGrokbuild)
@@ -137,9 +132,92 @@ func TestGrokApplyWritesContextWindowAndReasoningSupport(t *testing.T) {
 	}
 }
 
-// 元数据缺失或明确不支持思考时两个字段都不写，不落无依据的猜测值；
-// 最大输出（max_completion_tokens）与图像输入本就没有落点。
-func TestGrokApplyOmitsAbsentModelMetadata(t *testing.T) {
+// 模型声明 max 时按 max 写菜单项与默认档，不再折算 xhigh（1.0.92 的
+// reasoning_efforts 菜单能以 max 作为独立档位）。
+func TestGrokDeclaredMaxWritesMax(t *testing.T) {
+	home := newIsolated(t)
+	input := providerInput("p1", ProtocolOpenaiChatCompletions, "https://p1.test/v1")
+	reasoning := true
+	input.Models = []ProviderModelInput{{
+		ID:              "model-a",
+		Label:           "Model A",
+		Reasoning:       &reasoning,
+		ReasoningLevels: []ReasoningLevel{ReasoningLow, ReasoningHigh, ReasoningMax},
+	}}
+	if _, err := home.store.Upsert(input); err != nil {
+		t.Fatal(err)
+	}
+
+	home.apply(t, "p1", agentsGrokbuild, []string{"model-a"}, "model-a", levelPtr(ReasoningMax))
+	content := mustRead(t, mustGrokConfigPath(t, home.env))
+	if !strings.Contains(content, `default_reasoning_effort = "max"`) {
+		t.Fatalf("声明的 max 应按 max 落盘：\n%s", content)
+	}
+	root := mustTOML(t, content)
+	assertGrokMenu(t, root, "reins-p1--model-a", "low", "high", "max")
+	assertGrokMenuDefault(t, root, "reins-p1--model-a", "max")
+}
+
+// 菜单必须有 default 项：没有工具默认档时取 high，避免 Grok 退回菜单第一项
+// （按枚举序可能是 none，等于把默认思考关掉）。
+func TestGrokMenuDefaultsToHighWithoutToolLevel(t *testing.T) {
+	home := newIsolated(t)
+	input := providerInput("p1", ProtocolOpenaiChatCompletions, "https://p1.test/v1")
+	reasoning := true
+	input.Models = []ProviderModelInput{{
+		ID:              "model-a",
+		Label:           "Model A",
+		Reasoning:       &reasoning,
+		ReasoningLevels: []ReasoningLevel{ReasoningOff, ReasoningLow, ReasoningHigh},
+	}}
+	if _, err := home.store.Upsert(input); err != nil {
+		t.Fatal(err)
+	}
+
+	home.apply(t, "p1", agentsGrokbuild, []string{"model-a"}, "model-a", nil)
+	content := mustRead(t, mustGrokConfigPath(t, home.env))
+	if strings.Contains(content, "default_reasoning_effort") {
+		t.Fatalf("未设置工具默认档时不应写全局默认档：\n%s", content)
+	}
+	root := mustTOML(t, content)
+	assertGrokMenu(t, root, "reins-p1--model-a", "none", "low", "high")
+	assertGrokMenuDefault(t, root, "reins-p1--model-a", "high")
+}
+
+// 没有等级元数据的推理模型保留旧式 supports_reasoning_effort，菜单由
+// Grok/端点决定；旧式默认菜单（low/medium/high/xhigh）没有 max，Max 仍
+// 折算成 xhigh。
+func TestGrokMaxFoldsToXhighWithoutModelLevels(t *testing.T) {
+	home := newIsolated(t)
+	input := providerInput("p1", ProtocolOpenaiChatCompletions, "https://p1.test/v1")
+	reasoning := true
+	input.Models = []ProviderModelInput{{
+		ID:        "model-a",
+		Label:     "Model A",
+		Reasoning: &reasoning,
+	}}
+	if _, err := home.store.Upsert(input); err != nil {
+		t.Fatal(err)
+	}
+
+	home.apply(t, "p1", agentsGrokbuild, []string{"model-a"}, "model-a", levelPtr(ReasoningMax))
+	content := mustRead(t, mustGrokConfigPath(t, home.env))
+	for _, expected := range []string{
+		"supports_reasoning_effort = true",
+		`default_reasoning_effort = "xhigh"`,
+	} {
+		if !strings.Contains(content, expected) {
+			t.Fatalf("config.toml 缺少 %s：\n%s", expected, content)
+		}
+	}
+	if strings.Contains(content, "reasoning_efforts") {
+		t.Fatalf("没有等级元数据时不应凭空写菜单：\n%s", content)
+	}
+}
+
+// 明确声明不推理的模型写 supports_reasoning_effort = false，阻断与内置同名
+// 模型（grok-4.5/4.6）的菜单继承；没有落点的字段仍不写。
+func TestGrokApplyWritesExplicitFalseForNonReasoningModel(t *testing.T) {
 	home := newIsolated(t)
 	input := providerInput("p1", ProtocolOpenaiChatCompletions, "https://p1.test/v1")
 	reasoning := false
@@ -156,10 +234,62 @@ func TestGrokApplyOmitsAbsentModelMetadata(t *testing.T) {
 
 	home.apply(t, "p1", agentsGrokbuild, []string{"model-a"}, "model-a", nil)
 	content := mustRead(t, mustGrokConfigPath(t, home.env))
-	for _, unexpected := range []string{"context_window", "supports_reasoning_effort", "max_completion_tokens"} {
+	if !strings.Contains(content, "supports_reasoning_effort = false") {
+		t.Fatalf("非推理模型应写显式 false：\n%s", content)
+	}
+	for _, unexpected := range []string{"context_window", "reasoning_efforts", "max_completion_tokens"} {
 		if strings.Contains(content, unexpected) {
 			t.Fatalf("不应写 %s：\n%s", unexpected, content)
 		}
+	}
+}
+
+// 默认档只作用于默认模型，必须是该模型菜单内的一档；Grok 的 /effort 与
+// --effort 只接受菜单值，写盘前必须拦住，不能等用户进 Grok 才报错。
+func TestGrokRejectsDefaultLevelOutsideModelMenu(t *testing.T) {
+	home := newIsolated(t)
+	input := providerInput("p1", ProtocolOpenaiChatCompletions, "https://p1.test/v1")
+	reasoning := true
+	input.Models = []ProviderModelInput{{
+		ID:              "model-a",
+		Label:           "Model A",
+		Reasoning:       &reasoning,
+		ReasoningLevels: []ReasoningLevel{ReasoningLow, ReasoningHigh, ReasoningMax},
+	}}
+	if _, err := home.store.Upsert(input); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := applyProviderInner(home.store, home.env,
+		plan("p1", agentsGrokbuild, []string{"model-a"}, "model-a", levelPtr(ReasoningXhigh)))
+	if err == nil {
+		t.Fatal("默认档不在菜单内应拒绝应用")
+	}
+	for _, expected := range []string{"不在模型", "low、high、max"} {
+		if !strings.Contains(err.Error(), expected) {
+			t.Fatalf("错误应包含 %s：%v", expected, err)
+		}
+	}
+}
+
+// 默认模型明确不支持思考等级时，默认档没有生效对象，应在写盘前拒绝。
+func TestGrokRejectsDefaultLevelForNonReasoningModel(t *testing.T) {
+	home := newIsolated(t)
+	input := providerInput("p1", ProtocolOpenaiChatCompletions, "https://p1.test/v1")
+	reasoning := false
+	input.Models = []ProviderModelInput{{
+		ID:        "model-a",
+		Label:     "Model A",
+		Reasoning: &reasoning,
+	}}
+	if _, err := home.store.Upsert(input); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := applyProviderInner(home.store, home.env,
+		plan("p1", agentsGrokbuild, []string{"model-a"}, "model-a", levelPtr(ReasoningHigh)))
+	if err == nil || !strings.Contains(err.Error(), "不支持思考等级") {
+		t.Fatalf("应拒绝非推理模型的默认档：%v", err)
 	}
 }
 
@@ -180,4 +310,73 @@ func TestGrokAnthropicBaseURLGetsV1SuffixAndInspectStaysApplied(t *testing.T) {
 	if grok.Entries[0].Status != EntryStatusApplied {
 		t.Fatalf("反读按同一口径比对后应保持已应用：%s", grok.Entries[0].Status)
 	}
+}
+
+// grokMenuItems：取 [model.<key>].reasoning_efforts 的数组项；TOML 解码的
+// 数组元素类型随库实现可能是 []map[string]any 或 []any，两种都收。
+func grokMenuItems(t *testing.T, root map[string]any, modelKey string) []map[string]any {
+	t.Helper()
+	modelTable, ok := tomlTable(tomlGet(root, "model"))
+	if !ok {
+		t.Fatalf("缺少 model 表：%#v", root)
+	}
+	entry, ok := tomlTable(modelTable[modelKey])
+	if !ok {
+		t.Fatalf("缺少模型条目 %s：%#v", modelKey, modelTable)
+	}
+	items, _ := entry["reasoning_efforts"].([]map[string]any)
+	if items == nil {
+		generic, ok := entry["reasoning_efforts"].([]any)
+		if !ok {
+			t.Fatalf("reasoning_efforts 不是数组：%#v", entry["reasoning_efforts"])
+		}
+		for _, item := range generic {
+			table, ok := tomlTable(item)
+			if !ok {
+				t.Fatalf("reasoning_efforts 项不是表：%#v", item)
+			}
+			items = append(items, table)
+		}
+	}
+	return items
+}
+
+// assertGrokMenu：断言菜单 value 序列。
+func assertGrokMenu(t *testing.T, root map[string]any, modelKey string, expected ...string) {
+	t.Helper()
+	items := grokMenuItems(t, root, modelKey)
+	values := make([]string, 0, len(items))
+	for _, item := range items {
+		value, ok := nodeAsTOMLStr(tomlGet(item, "value"))
+		if !ok {
+			t.Fatalf("reasoning_efforts.value 不是字符串：%#v", item)
+		}
+		values = append(values, value)
+	}
+	if len(values) != len(expected) {
+		t.Fatalf("菜单项：%v，期望：%v", values, expected)
+	}
+	for index := range expected {
+		if values[index] != expected[index] {
+			t.Fatalf("菜单项：%v，期望：%v", values, expected)
+		}
+	}
+}
+
+// assertGrokMenuDefault：断言菜单的 default 项。没有 default 时 Grok 会取
+// 第一项，所以写菜单必须标一个。
+func assertGrokMenuDefault(t *testing.T, root map[string]any, modelKey string, expected string) {
+	t.Helper()
+	for _, item := range grokMenuItems(t, root, modelKey) {
+		flag, _ := item["default"].(bool)
+		if !flag {
+			continue
+		}
+		value, _ := nodeAsTOMLStr(tomlGet(item, "value"))
+		if value != expected {
+			t.Fatalf("菜单默认项：%s，期望：%s", value, expected)
+		}
+		return
+	}
+	t.Fatalf("菜单没有 default 项，期望：%s", expected)
 }
