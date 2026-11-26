@@ -3,6 +3,7 @@
 - 日期：2026-10-16
 - 性质：排查记录 + 决策记录。覆盖根因、修复方案、回归测试 seam 与文案取舍。
 - 范围：`src-tauri/src/providers/catalog.rs` 的 `load_modelsdev_data` 网络层，以及 `src-tauri/src/tests/providers_catalog.rs` 的网络层回归测试。
+- 2026-11-19 迁移注记：文中 `src-tauri/src/providers/catalog.rs`、`tests/providers_catalog.rs` 与 `cargo` 命令为 Rust 时代路径；现行实现在 `internal/providers/catalog.go` 及对应 Go 测试，超时与错误文案结论不变。
 
 ## 现象
 

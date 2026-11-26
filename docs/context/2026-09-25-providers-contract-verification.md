@@ -4,6 +4,7 @@
 - 性质：契约核对记录。逐项比对 providers 域五个工具的写入/反读契约与官方文档，给出结论、来源与后续动作。
 - 结论速览：写入契约主体与官方一致；发现 3 个不一致（Pi `off` 值、Claude 思考等级值域、OpenCode 思考等级声明未实现）与 2 条风险备注（Grok `model_providers` 未文档化、OpenCode Windows 路径 XDG 不生效）。
 - 后续复测：2026-09-27 起按日期追加补充节（Grok base_url 与逐模型元数据、OpenCode `openai_responses` 复测、其余四个工具的模型元数据配置面），结论以对应日期的小节为准。
+- 2026-11-19 迁移注记：正文中 `apps/*.rs`、`tests/providers*.rs`、`cargo` 等为迁移前路径与命令；现行实现见 `internal/providers/` 与 `internal/workspace/`，契约结论与日期补充节不受影响。
 
 ## 来源
 
@@ -77,11 +78,12 @@
 | `api_backend: chat_completions \| responses \| messages` | ✅ 一致 | settings-reference 原文，与实测值相同 |
 | `[model.<id>]` 的 `api_key`/`base_url`/`name`/`extra_headers` | ✅ 一致 | settings-reference（`extra_headers` 可承载 anthropic 头） |
 | `[model.<id>].context_window` | ✅ 已补写（2026-09-27） | settings-reference 原文「Context window size (drives auto-compact timing)」；此前未写，grok 缺该字段按 200000 兜底，见 2026-09-27 补充节 |
-| `[model.<id>].supports_reasoning_effort` | ✅ 已补写（2026-09-27） | settings-reference 原文「Reasoning controls when supported」；此前未写，grok 判该模型不支持思考等级并丢弃 `[models].default_reasoning_effort`，见 2026-09-27 补充节 |
+| `[model.<id>].supports_reasoning_effort` | ⚠️ deprecated（grok 1.0.92） | 2026-09-27 曾按该字段补写；1.0.92 起 settings-reference 标记 deprecated，改用 `reasoning_efforts`。Reins 现在只在模型没有等级元数据时保留它作旧式兜底；模型显式 `reasoning=false` 时写 `false` 阻断内置同名模型继承，见 2026-11-26 补充节 |
+| `[model.<id>].reasoning_efforts` | ✅ 已接入（2026-11-26） | 1.0.92 的 per-model 思考档位菜单（array of tables，`value`/`label`/`description`/`default`）；`value` 只接受 none/minimal/low/medium/high/xhigh/max。Reins 按模型 `reasoning_levels` 逐档写入，见 2026-11-26 补充节 |
 | `[model.<id>]` 的图像/多模态字段 | ⛔ 不存在 | settings-reference 全表无 image/vision 字段；1.0.41 实测 `supports_images`/`input`/`supports_vision` 被静默忽略，模型元数据无变化。图片相关只有 `[models].image_description`（语义为图片描述模型），Reins 不写图像输入 |
 | `[models].default` / `[models].default_reasoning_effort` | ✅ 键名与位置一致 | settings-reference（位于 `[models]` 段） |
 | `[model_providers]` 表 + `model_provider` 字段 | ⚠️ 备注：官方未文档化 | 官方简化格式是 `[model.<id>]` 直接带 `base_url`/`env_key`；我们的写法来自 grok 1.0.40 实测（`grok inspect --json` 可识别），需真机复测当前版本 |
-| `default_reasoning_effort` 值域 | ✅ 已实测 | 2026-09-27 grok 1.0.41：接受 `none/minimal/low/medium/high/xhigh/max`，拒绝 `off`（报 `invalid reasoning effort`）。Grok 交互 UI 只渲染 low/medium/high/xhigh 四档并把用户选择写回 config；Reins 已把 `Max` 档映射写出 `"xhigh"`（请求层两者等价，见下条），其余档同名直写 |
+| `default_reasoning_effort` 值域与菜单约束 | ✅ 已实测（1.0.92 更新） | 配置层接受 `none/minimal/low/medium/high/xhigh/max`、拒绝 `off`；但 `/effort` 与 `--effort` 只接受当前模型菜单内的档位（报 `unknown effort level ... use one of`）。模型有 `reasoning_efforts` 菜单时按菜单值写，`max` 不再无条件折算 xhigh；只有无等级元数据的旧式兜底仍折算 xhigh，见 2026-11-26 补充节 |
 | `messages` 后端 base_url 请求路径 = `{base_url}/messages`，不补 `/v1` | ❌→✅ 已修复 | 2026-09-27 grok 1.0.41 本地监听实测（配置 `/v1` 结尾 → 请求 `/v1/messages` 正常完成；不带 → 请求 `/messages`）；与 Anthropic SDK「base_url 不带版本段」约定不同，grokbuild 写入时对 `anthropic_messages` 规范化补 `/v1`，反读按同一口径比对 |
 
 ## 真机验证结果（2026-09-25）
@@ -119,10 +121,34 @@
 方法：隔离 `GROK_HOME` + 合成 config.toml（两个自定义模型对照：裸模型 / 带 `context_window` 等字段），`grok -p --debug-file` 与 `grok models`，读 debug 日志与 `session/new` 响应的 `availableModels[]._meta`；另用三个候选字段名探测未知字段行为。
 
 - **`context_window` 缺失时按 200000 兜底**：debug 日志原文 `new model missing context_window, defaulting to 200000 -- set context_window in [model.<key>] to override`；模型 _meta 为 `totalContextTokens: 200000`。写上 `context_window = 128000` 后日志不再出现该条、_meta 为 `128000`。该值驱动自动压缩时机（`[session].auto_compact_threshold_percent` 默认 85）——Reins 此前不写该字段，对非 200K 窗口的模型时机失准。处置：apply 现在有元数据就写 `context_window`，新增测试 `grok_apply_writes_context_window_and_reasoning_support`、`grok_apply_omits_absent_model_metadata`。
-- **`supports_reasoning_effort` 是默认档生效前提**：裸模型 + `[models].default_reasoning_effort = "high"` 时 grok 打 WARN `reasoning_effort: model does not support effort; ignoring it session_id=… model=test-bare effort=high`；模型写 `supports_reasoning_effort = true` 后 _meta 出现 `supportsReasoningEffort: true`（`reasoning_effort = "low"` 亦反映到 _meta 的 `reasoningEffort`）。即 Reins 此前写的 `default_reasoning_effort` 在其自定义模型上被静默忽略。处置：`model.reasoning == Some(true)` 时写 `supports_reasoning_effort = true`。
+- **`supports_reasoning_effort` 是默认档生效前提**：裸模型 + `[models].default_reasoning_effort = "high"` 时 grok 打 WARN `reasoning_effort: model does not support effort; ignoring it session_id=… model=test-bare effort=high`；模型写 `supports_reasoning_effort = true` 后 _meta 出现 `supportsReasoningEffort: true`（`reasoning_effort = "low"` 亦反映到 _meta 的 `reasoningEffort`）。即 Reins 此前写的 `default_reasoning_effort` 在其自定义模型上被静默忽略。处置：`model.reasoning == Some(true)` 时写 `supports_reasoning_effort = true`（2026-11-26 起改为优先写 `reasoning_efforts` 菜单，见后文）。
 - **图像输入无配置落点**：`[model.<id>]` 表无任何 image/vision 字段（settings-reference 全表核对），探测 `supports_images = true`、`input = ["text","image"]`、`supports_vision = true` 三个候选字段全部被静默忽略（debug 日志无 unknown-field 警告，模型 _meta 与裸模型完全相同）；连内置 `grok-4.6` 的 _meta 也没有图片能力字段。Reins 的 `supports_images` 元数据在 Grok 侧不写，由应用弹窗明示。
 - 交叉观察：`_meta.agentType` 均为 `grok-build-plan`；`max_completion_tokens` 实测被接受（解析无 unknown-field 警告），但它是采样上限而非元数据落点，Reins 不写。
 - 上述事实与各工具写入口径汇总到能力表 `unwritten_model_fields`，经 `ProviderAppState` 下发到应用弹窗；对应测试 `app_states_declare_unwritten_model_fields`。
+
+## 2026-11-26 补充：Grok 1.0.92 思考档位菜单（reasoning_efforts）
+
+方法：隔离 `GROK_HOME` + 合成 config.toml，`grok models --debug-file` 读 `session/new` / `availableModels[]._meta`，并用 `grok --effort` 做正负对照；契约文本核对本机随包文档 `~/.grok/docs/user-guide/26-config-reference.md`（grok 1.0.92）。
+
+- **`reasoning_efforts` 是 per-model 菜单**：`[model.<id>]` 的 `reasoning_efforts` 为 array of tables，字段 `value` / `label` / `description` / `default`。`value` 只接受 `none` / `minimal` / `low` / `medium` / `high` / `xhigh` / `max`；大小写不敏感（`HIGH` 规范化为 `high`），但不做 trim（`" high "` 无效），也没有 `off` / `x-high` 等别名。
+- **一项非法会让整个菜单静默失效**：数组里任意一项 value 未知、缺 value、value 非字符串（如 `3`）或带未 trim 的空格，整个 `reasoning_efforts` 被丢弃——`_meta` 里既没有 `supportsReasoningEffort` 也没有 `reasoningEfforts`，`grok --effort high` 退化为 `warning: <id> has no effort levels; ignoring ...`。不是跳过坏项。
+- **菜单决定 CLI 档位**：`reasoning_efforts = [{value="low"},{value="high"}]` 时 `--effort minimal` 报 `unknown effort level 'minimal'; use one of: low, high`；`--effort high` 正常进入请求。没有菜单、只写 `supports_reasoning_effort = true` 时，端点没有提供菜单则回落到默认四档 `xhigh/high/medium/low`（同样报 `use one of: xhigh, high, medium, low`），所以 `none` / `minimal` 在这些模型上不可用。
+- **`max` 是独立菜单档**：`reasoning_efforts` 声明 `max` 后 `_meta.reasoningEfforts` 包含 max，`default_reasoning_effort = "max"` 正常接受，不再需要 1.0.41 时期的 max→xhigh 折叠。没有等级元数据的旧式兜底菜单仍只有四档，此时 max 才折算 xhigh。
+- **配置层默认档不按菜单校验**：`[models].default_reasoning_effort` 写出菜单外的值时，会话启动仍会 `applied effort`（`grok models` 也不报错），但 `/effort` 与 `--effort` 会拒绝，菜单里也没有该项。默认档必须在默认模型的菜单内。
+- **不写默认档且菜单无 `default = true` 时取第一项**（实测为 `low`），不是「不设置」；因此不能靠省略默认档来规避菜单外取值。
+- **内置菜单**：grok-4.6 为 `xhigh/high/medium/low`，grok-4.5 为 `high/medium/low`；`model = "grok-4.6"` 的自定义条目在不写任何标记时会继承内置菜单（连 description 一起继承），写 `supports_reasoning_effort = false` 可阻断并移出菜单。
+- **`supports_reasoning_effort` 已 deprecated**：settings-reference 明确「prefer reasoning_efforts」；显式 `false` 仍有意义（阻止从端点或同模型内置目录继承菜单），`true` 只在没有等级元数据时作为旧式兜底。`model.<id>.reasoning_effort`（单值）同样 deprecated，Reins 不写。
+
+处置（Grok adapter）：
+
+- 模型有 `reasoning_levels` → 逐档写 `reasoning_efforts = [{ value = ... }]`，不再写 `supports_reasoning_effort = true`；
+- 模型 `reasoning = false` → 写 `supports_reasoning_effort = false`，并忽略等级集；
+- 模型 `reasoning = true` 但没有等级元数据 → 保留 `supports_reasoning_effort = true` 旧式兜底；
+- 默认档按默认模型的菜单校验，不在菜单内拒绝应用；有菜单时 `max` 按 `max` 写，无等级元数据时折算 `xhigh`；
+- 每个菜单标一个 `default = true` 项：默认模型优先用工具默认档，其余模型取 `high`（未声明 high 时取最高档）；没有 default 时 Grok 会取数组第一项，按枚举序可能是 `none`；
+- 能力表 `BehaviorNotes` 同步上述差异，展示在 Agent 页「?」弹窗。
+
+对应测试：`TestGrokApplyWritesReasoningMenuFromModelLevels`、`TestGrokDeclaredMaxWritesMax`、`TestGrokMaxFoldsToXhighWithoutModelLevels`、`TestGrokApplyWritesExplicitFalseForNonReasoningModel`、`TestGrokRejectsDefaultLevelOutsideModelMenu`、`TestGrokRejectsDefaultLevelForNonReasoningModel`。
 
 ## 2026-09-27 补充：OpenCode openai_responses 复测（opencode v2.0.18）
 
@@ -276,9 +302,9 @@
 2. ✅ Claude 能力表收窄为官方值域 low/medium/high/xhigh/max，`off/minimal` 不再放行。
 3. ✅ OpenCode 能力表思考等级清空（apply 本就不消费、文档未确认写法），弹窗不再出现该选项。
 4. ✅ Codex 能力表收掉 off 档（写入 "none" 无文档依据；minimal 保留，用户决策 A），新增测试 `codex_off_reasoning_level_is_rejected`。
-5. ✅ Grok `Max` 档映射写出 `"xhigh"`（2026-09-27：Grok UI 无 max 档、messages 后端请求层 max 与 xhigh 等价），新增测试 `grok_max_reasoning_writes_xhigh`；`messages` 后端 base_url 写入补 `/v1`，新增测试 `grok_anthropic_base_url_gets_v1_suffix_and_inspect_stays_applied`。
+5. ✅ Grok `Max` 档映射写出 `"xhigh"`（2026-09-27：Grok UI 无 max 档、messages 后端请求层 max 与 xhigh 等价），新增测试 `grok_max_reasoning_writes_xhigh`；`messages` 后端 base_url 写入补 `/v1`，新增测试 `grok_anthropic_base_url_gets_v1_suffix_and_inspect_stays_applied`。（2026-11-26 起：模型声明 max 时改为按 `reasoning_efforts` 写 `"max"`，只有无等级元数据的旧式兜底仍折算 xhigh，见上节。）
 6. ✅ OpenCode `openai_responses` 恢复放行（2026-09-27 v2.0.18 复测 `openai/responses` 端到端可用；`openai-compatible/responses` 仍有包解析缺陷，不采用），apply 写 `openai/responses`，新增测试 `opencode_apply_responses_uses_openai_responses_package`。
-7. ✅ Grok 逐模型补写 `context_window`（有元数据时）与 `supports_reasoning_effort = true`（`reasoning` 为真时），新增测试 `grok_apply_writes_context_window_and_reasoning_support`、`grok_apply_omits_absent_model_metadata`（2026-09-27，依据见上节）。
+7. ✅ Grok 逐模型补写 `context_window`（有元数据时）与 `supports_reasoning_effort = true`（`reasoning` 为真时），新增测试 `grok_apply_writes_context_window_and_reasoning_support`、`grok_apply_omits_absent_model_metadata`（2026-09-27，依据见上节）。（2026-11-26 起改为按模型等级写 `reasoning_efforts`，见上节。）
 8. ✅ 能力表新增 `unwritten_model_fields`，`ProviderAppState` 下发到应用弹窗明示不写入的模型元数据（Codex/Claude/OpenCode 四类全列、Grok 列最大输出与图像输入、Pi 为空），新增测试 `app_states_declare_unwritten_model_fields` 与前端 `model.test.ts` 用例。
 9. ✅ Codex 写 `model_context_window`（默认模型元数据；替换时无元数据则清、移除时按元数据归属清），新增测试 `codex_apply_writes_and_clears_model_context_window`、`codex_remove_clears_model_context_window`。
 10. ✅ Claude Code 写 `env.CLAUDE_CODE_MAX_CONTEXT_TOKENS` / `env.CLAUDE_CODE_MAX_OUTPUT_TOKENS`，移除时随 `env` 清掉，新增测试 `claude_apply_writes_context_and_output_env_and_remove_clears_them`。

@@ -93,6 +93,7 @@ DSH MCP 配置自定义 MarshalJSON。
 
 ## 失效文档
 
+- 本决策日期之前的所有 `docs/decisions/*` 记录写于 Rust 时代：其中的 `.rs` 路径、`cargo`/`clippy`/`fmt` 命令均为历史记录，按 Go `internal/` 对应文件与仓库根 AGENTS.md 的验收命令理解，不逐条重写。
 - [域边界决策](2026-05-22-domain-boundaries.md)：Rust 三业务域表述按 Go `internal/` 理解，
   红线本身不变（前端域间、Go 三域两两禁依赖；`support` 只放无业务语义工具——dsh_patch 与
   jsonc 预处理在 Go 侧已按此归位）。

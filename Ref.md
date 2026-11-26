@@ -63,7 +63,7 @@ commit 与当时 latest tag。
   另有 `CODEX_OSS_BASE_URL`。
 - **版本差异**:release 与仓库同步(二进制即由此构建);变化点集中在 crate
   划分与 `wire_api` 值域,升级时按上面路径复核。
-- **reins 接入**:reader `session/codex.rs`、adapter `providers/apps/codex.rs`、
+- **reins 接入**:reader `internal/session/codex.go`、adapter `internal/providers/app_codex.go`、
   契约 `docs/context/2026-09-25-providers-contract-verification.md`
   (补充三/五/六)。
 
@@ -95,7 +95,7 @@ commit 与当时 latest tag。
   `docs/environment-variables.md`)。
 - **版本差异**:未见商业版说明(pi.dev 承担文档站与 share viewer);以已安装
   CLI 的 `--version` 与 schemas 为准。
-- **reins 接入**:reader `session/pi.rs`、adapter `providers/apps/pi.rs`、
+- **reins 接入**:reader `internal/session/pi.go`、adapter `internal/providers/app_pi.go`、
   探索记录 `docs/context/2026-09-05-pi-session-source-review.md`、
   `2026-09-11-pi-data-storage-and-subagent-extension.md`。
 
@@ -133,12 +133,18 @@ commit 与当时 latest tag。
   `context_window`、`reasoning_efforts` 等——**全字段表在随包文档
   `docs/user-guide/26-config-reference.md:387-426`**,单模型指引
   `11-custom-models.md`;内置目录 `xai-grok-models/default_models.json`。
+  思考档位以 `reasoning_efforts`(per-model 菜单,value 只接受
+  none/minimal/low/medium/high/xhigh/max,任一项非法整个菜单静默失效)为准;
+  `supports_reasoning_effort` / `reasoning_effort`(单值)已 deprecated,
+  前者显式 `false` 仍用于阻断内置同名模型的菜单继承。默认档
+  `[models].default_reasoning_effort` 必须在默认模型菜单内(1.0.92 实测,
+  见 `docs/context/2026-09-25-providers-contract-verification.md` 2026-11-26 补充)。
 - **目录重定向**:`GROK_HOME`(`xai-dirs/src/lib.rs:62-81`);
   另有 `GROK_CONFIG`/`GROK_CONFIG_PATH` overlay(白名单键)。
 - **版本差异**:同步仓库 vs 官方安装脚本产物,以 `grok --version` 实测为准;
   文档随包导出到 `~/.grok/docs/user-guide/`,可直接读本机版本对应的文档。
-- **reins 接入**:reader `session/grokbuild.rs`、adapter
-  `providers/apps/grokbuild.rs`、`docs/context/grokbuild-integration-analysis.md`、
+- **reins 接入**:reader `internal/session/grokbuild.go`、adapter
+  `internal/providers/app_grokbuild.go`、`docs/context/grokbuild-integration-analysis.md`、
   `docs/decisions/2026-10-12-grokbuild-index-cache.md`。
 
 ### 4. deepseek-ai/deepseek-harness（dsh）
@@ -173,7 +179,7 @@ commit 与当时 latest tag。
   `packages/util/home-paths` 的 `resolveDshHome()`)。
 - **版本差异**:alpha、破坏性变更预警;格式版本号显式存在(读文件前先认
   `vN`),reins 的 reader 已按该结构实现。
-- **reins 接入**:reader `session/dsh.rs`、adapter `providers/apps/dsh.rs`、
+- **reins 接入**:reader `internal/session/dsh.go`、adapter `internal/providers/app_dsh.go`、
   `docs/context/2026-10-07-dsh-session-storage-exploration.md`。
 
 ### 5. anomalyco/opencode
@@ -209,9 +215,9 @@ commit 与当时 latest tag。
   `packages/core/src/plugin/provider/*.ts`;模型目录来自 models.dev
   (`packages/core/src/models-dev.ts` + 快照)。
 - **目录重定向**:无目录重定向变量;注意 **Windows 不认 XDG_CONFIG_HOME**
-  (reins 实测,见 `environment.rs` 注释)。
-- **reins 接入**:reader `session/opencode.rs`、adapter
-  `providers/apps/opencode.rs`、契约文档处置结果 6/11/12/16。
+  (reins 实测,见 `internal/support/environment.go` 注释)。
+- **reins 接入**:reader `internal/session/opencode.go`、adapter
+  `internal/providers/app_opencode.go`、契约文档处置结果 6/11/12/16。
 
 ### 6. zai-org/ZCode ⭐（provider 规则体系原生开源）
 
@@ -264,8 +270,8 @@ commit 与当时 latest tag。
   一致时用仓库 tag(可读、可 diff);不一致时以「本机 app 包内置配置 +
   运行时落盘文件」为准(bundle 反编译仅作补充,例:
   `/Applications/ZCode.app/Contents/Resources/glm/zcode.cjs`)。
-- **reins 接入**:reader `session/zcode.rs`、adapter
-  `providers/apps/zcode.rs`、契约
+- **reins 接入**:reader `internal/session/zcode.go`、adapter
+  `internal/providers/app_zcode.go`、契约
   `docs/context/2026-09-25-providers-contract-verification.md` 补充(七)、
   `docs/context/2026-09-29-zcode-session-storage-exploration.md`。
 
@@ -278,8 +284,8 @@ commit 与当时 latest tag。
   `ANTHROPIC_AUTH_TOKEN`(旧 `ANTHROPIC_API_KEY` 只读识别)、
   `CLAUDE_CONFIG_DIR` 重定向、`CLAUDE_CODE_MAX_CONTEXT_TOKENS`/
   `CLAUDE_CODE_MAX_OUTPUT_TOKENS`。
-- 会话转录格式靠实测维护:reader `session/claude_code.rs`、
-  adapter `providers/apps/claude.rs`。
+- 会话转录格式靠实测维护:reader `internal/session/claude_code.go`、
+  adapter `internal/providers/app_claude.go`。
 
 ## 三、横向对照表
 

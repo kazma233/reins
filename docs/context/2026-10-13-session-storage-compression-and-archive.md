@@ -4,6 +4,7 @@
 - 性质:探索记录 + 落地说明。证据来源:各上游源码(按发布 tag,见 Ref.md)、本机实测数据目录。
 - 触发:codex 打开 `features.local_thread_store_compression` 后,冷会话转录被原地压成
   `.jsonl.zst`,reins 列表只认 `.jsonl`,可见会话从上千个掉到 5 个。
+- 2026-11-19 迁移注记:Reins 侧 `session/*.rs` 为迁移前路径,现行实现在 `internal/session/`;上游 codex/thread-store 的 `.rs` 引用保留,格式结论不变。
 
 ## 结论(TL;DR)
 

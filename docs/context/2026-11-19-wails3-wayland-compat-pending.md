@@ -3,6 +3,7 @@
 - 日期：2026-11-19
 - 状态：待确认（挂起，用户明确当前无法处理）
 - 来源：Rust/Tauri2 → Go/Wails3 迁移收尾检查；决策记录见 [go-wails3-migration](../decisions/2026-11-19-go-wails3-migration.md)
+- 2026-11-19 迁移注记：文中「旧行为」引用 `src-tauri/src/main.rs` 仅作迁移前对照，Go 侧对应 `main.go`。
 
 ## 背景
 

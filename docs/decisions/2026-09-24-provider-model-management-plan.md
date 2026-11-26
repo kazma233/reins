@@ -6,7 +6,7 @@
 
 ## 1. 模块定位
 
-- 前端：`src/features/providers/`；Rust：`src-tauri/src/providers/`。
+- 前端：`src/features/providers/`；后端：`internal/providers/`（2026-11-19 起为 Go/Wails，Rust 时代路径见迁移决策）。
 - 壳层新增第三个一级模式「模型配置」（`src/app/stores/app.ts` 的 `AppMode` 扩展，`AppModeRail.vue` 增加入口）。
 - 持久化：独立文件 `<Reins 数据目录>/providers.yaml`（与现有 `config.yaml` 同目录、互不解析）。
 - 独立 `ProviderConfigStore`，不依赖 `WorkspaceConfigStore`、`AgentTargetId`、workspace target、Skills、MCP 或会话数据。
@@ -57,7 +57,7 @@ providers:
 
 变更原因（对照）：系统密钥管理（macOS Keychain）会在每次取明文时弹一次登录钥匙串密码，而列表反显、编辑回显、预览脱敏各需要一次读取，一次操作串起来要输多次密码；dev 构建的二进制签名每次编译都变，「始终允许」不生效。用户在知晓明文落盘风险后明确选择废弃密钥链，接受这里的安全降级：`providers.yaml` 即凭据文件，备份/同步/误提交会直接泄露 Key。
 
-随之废弃：`keychain.rs`、`ProviderKeyStore`、`set_provider_key` / `get_provider_key` 命令、`ProviderView.keyPresent`（改为下发 `apiKey`）、`keyring` 依赖，以及 Linux 无 Secret Service 的报错分支（不再存在）。旧版本写在系统钥匙串里的条目不做迁移（读取就会弹密码），需用户在编辑弹窗重新粘贴一次。
+随之废弃：Rust 时代的 `keychain.rs`、`ProviderKeyStore`、`set_provider_key` / `get_provider_key` 命令、`ProviderView.keyPresent`（改为下发 `apiKey`）、`keyring` 依赖，以及 Linux 无 Secret Service 的报错分支（不再存在）。旧版本写在系统钥匙串里的条目不做迁移（读取就会弹密码），需用户在编辑弹窗重新粘贴一次。
 
 ## 5. 协议与工具能力
 
@@ -81,11 +81,11 @@ providers:
 | Claude Code | `env.ANTHROPIC_BASE_URL`（聚合平台必写；不写官方端点）、`env.ANTHROPIC_AUTH_TOKEN`（2026-09-28 起由 `ANTHROPIC_API_KEY` 改写此键，旧键随重新应用清理）、`env.CLAUDE_CODE_MAX_CONTEXT_TOKENS` / `env.CLAUDE_CODE_MAX_OUTPUT_TOKENS`（取自默认模型元数据，缺失时清空）、`model`、`effortLevel`；保留文件中其他键 |
 | OpenCode v2 | `providers["reins-x"]`（v2 规范 schema：`name`、`package` 按协议选 `@opencode/ai/providers/openai-compatible` / `@opencode/ai/providers/responses` / `@opencode/ai/providers/anthropic`、`settings.baseURL`、`settings.apiKey` 明文、`models`）+ 顶层 `model="reins-x/<id>"`；`models.<id>` 逐模型写 `limit{context,output}`（两项都齐全才写）、`capabilities{tools,input,output}`（`supports_images` 决定输入模态）、`settings` 思考设置（openai 系写 `reasoningEffort`，anthropic 包写 `thinking` 预算，见下条）；写入只用 v2 规范格式，v1 遗留格式（`provider`/`npm`/`options`）只读展示、可删除，不写入 |
 | Pi | `models.json` 的 `providers["reins-x"]`（baseUrl、api、apiKey、models 含 reasoning 等元数据）+ `settings.json` 的 `defaultProvider`、`defaultModel`、`defaultThinkingLevel` |
-| Grok Build | `[model_providers.reins-x]`（base_url、api_backend；`anthropic_messages` 的 base_url 写入时规范化为 `/v1` 结尾，见验证文档 2026-09-27 实测）+ 每个 `[model."reins-x--<id>"]`（model、name、model_provider、api_key；`anthropic_messages` 用 `extra_headers` 携带 `x-api-key` 与 `anthropic-version`；模型有元数据时另写 `context_window` 与 `supports_reasoning_effort = true`，见下条）+ `[models] default`、`default_reasoning_effort`（`Max` 档映射写出 `"xhigh"`：Grok UI 无 max 档且请求层两者等价）。模型的最大输出与图像输入在该工具无落点，应用弹窗明示 |
+| Grok Build | `[model_providers.reins-x]`（base_url、api_backend；`anthropic_messages` 的 base_url 写入时规范化为 `/v1` 结尾，见验证文档 2026-09-27 实测）+ 每个 `[model."reins-x--<id>"]`（model、name、model_provider、api_key；`anthropic_messages` 用 `extra_headers` 携带 `x-api-key` 与 `anthropic-version`；模型有等级元数据时写 `reasoning_efforts` 菜单，无等级元数据的推理模型写 `supports_reasoning_effort = true` 旧式兜底，显式非推理模型写 `false`，见下条）+ `[models] default`、`default_reasoning_effort`（默认档必须是默认模型菜单内的一档；有菜单时 `Max` 写 `"max"`，无等级元数据时折算 `"xhigh"`，见验证文档 2026-11-26 补充）。模型的最大输出与图像输入在该工具无落点，应用弹窗明示 |
 
 逐模型元数据的写入口径（能力表 `unwritten_model_fields` 与各适配器 apply 同源）：
 
-- Grok Build：`context_window` 有元数据就写；grok 1.0.41 实测缺该字段时按 200000 兜底，而自动压缩按该窗口计算（默认阈值 85%），对非 200K 模型时机失准。`supports_reasoning_effort = true` 在模型 `reasoning` 为真时写；实测未声明该字段的模型被判为不支持思考等级，`[models].default_reasoning_effort` 被静默忽略（`model does not support effort; ignoring it`），即该声明是默认档生效的前提。
+- Grok Build：`context_window` 有元数据就写；grok 1.0.41 实测缺该字段时按 200000 兜底，而自动压缩按该窗口计算（默认阈值 85%），对非 200K 模型时机失准。思考档位按 1.0.92 的 per-model 菜单写：模型有 `reasoning_levels` 时逐档写 `reasoning_efforts`（`off` 写 `none`，`max` 独立成档），并标一个 `default = true` 项（默认模型优先用工具默认档，其余模型取 `high`/最高档；否则 Grok 取数组第一项，可能是 `none`）；模型 `reasoning = false` 时写 `supports_reasoning_effort = false`，阻断与内置同名模型（grok-4.5/4.6）的菜单继承；只有模型 `reasoning = true` 且没有等级元数据时才保留 `supports_reasoning_effort = true` 旧式兜底（Grok 从端点 `/v1/models` 或默认四档取菜单）。默认档必须在默认模型菜单内，否则应用前拒绝；无等级元数据时 `Max` 折算 `xhigh`。详见验证文档 2026-11-26 补充。
 - Pi：逐模型写 `reasoning`、`contextWindow`、`maxTokens`、`input`（text/image），四类元数据全覆盖。
 - Codex：写默认模型的 `model_context_window`（官方 schema 顶层键，聚合模型不在内置目录时会走兜底元数据 272000 并告警 `Unknown model`）；最大输出与图像输入没有模型级字段，推理能力只有全局默认档、无 per-model 开关。
 - Claude Code：写 `env.CLAUDE_CODE_MAX_CONTEXT_TOKENS` 与 `env.CLAUDE_CODE_MAX_OUTPUT_TOKENS`（官方为网关模型提供的纠正入口：不写时输出按 32000、窗口按内置同名 ID 推断）；图像输入与 per-model 推理能力无对应键。
@@ -111,18 +111,17 @@ providers:
 ## 8. 实现结构
 
 ```
-src-tauri/src/providers/
-  mod.rs          # 域入口、re-export
-  config.rs       # ProviderConfigStore：providers.yaml 读写（含明文 api_key）、进程内锁、原子写（复用 write_atomic 模式）
-  types.rs        # ts-rs 导出 DTO（RawProvider.api_key 为明文落盘字段）
-  commands.rs     # Tauri 命令（不含单独的密钥读写命令）
-  catalog.rs      # 按协议拉取模型列表 + models.dev 缓存与匹配（Key 取自 providers.yaml）
-  apps/
-    mod.rs        # 适配器注册表 + 能力表（协议、必填字段、思考等级、替换/并存语义）
-    codex.rs / claude.rs / opencode.rs / pi.rs / grokbuild.rs
+internal/providers/
+  service.go      # Wails 方法入口（不含单独的密钥读写命令；顶部映射注释即 command 对照表）
+  config.go       # ProviderConfigStore：providers.yaml 读写（含明文 api_key）、进程内锁、原子写
+  types.go        # 前后端契约类型（wire 形状由 wails bindings 生成；RawProvider.api_key 为明文落盘字段）
+  catalog.go      # 按协议拉取模型列表 + models.dev 缓存与匹配（Key 取自 providers.yaml）
+  apps.go         # 适配器注册表 + 能力表（协议、必填字段、思考等级、替换/并存语义）
+  dialect.go      # 思考档位/协议方言表（apply 写入、inspect 反读、UI 映射文案同源）
+  app_codex.go / app_claude.go / app_opencode.go / app_pi.go / app_dsh.go / app_grokbuild.go / app_zcode.go
 ```
 
-命令：`get_providers_state`、Provider CRUD（含明文 Key 字段）、`fetch_provider_models_direct`、`fetch_modelsdev_catalog`、`apply_provider_to_app`、`remove_provider_from_app`。
+命令：`get_providers_state`、Provider CRUD（含明文 Key 字段）、`fetch_provider_models_direct`、`fetch_modelsdev_catalog`、`apply_provider_to_app`、`remove_provider_from_app`。上列是 Rust/Tauri 时代的 snake_case 命令名；Go 侧对应 Wails 导出的 PascalCase 方法，映射以各域 `service.go` 顶部注释为准。
 
 > 注：原计划里的 `fetch_provider_models`（按已保存平台 ID 拉取）已删除。拉取统一走 `fetch_provider_models_direct`，用表单当前值（含未保存的改动），不再读 `providers.yaml`。
 
@@ -163,7 +162,7 @@ src-tauri/src/providers/
 - Codex `model_reasoning_effort`：官方值域 `low/medium/high/xhigh/max/ultra`（非穷举）；我们写出的 `none/minimal` 在 codex-cli 0.145.0 客户端可加载（doctor + debug prompt-input），请求时行为需真实端点未验证。models.dev 数据源级佐证（2026-09-29）：`none`（gpt-5.3-codex 等）与 `minimal`（gpt-5-mini / gpt-5-nano）均为真实 effort 值，`max` 仅最新模型（gpt-5.6）提供。
 - Claude Code：`effortLevel` 键名与值域已按官方确认（low/medium/high/xhigh/max），能力表已收窄；本机未装 CLI，端到端仍未验证。
 - OpenCode：v2 规范 schema 运行时接受性已真机验证（v2.0.16 全局条目 + `opencode models`）；`openai_responses` 曾因 v2.0.16 对照实验静默加载失败关闭放行，2026-09-27 v2.0.18 复测 `openai/responses` 端到端可用恢复放行（`openai-compatible/responses` 同版初始化报 `Cannot find package '@opencode/ai'`，不采用）；思考等级已从能力表移除（apply 本就不消费）。
-- Grok：`default_reasoning_effort` / `reasoning_efforts` 合法取值未验证；`[model_providers]` 表 + `model_provider` 字段官方文档未记载（官方简化式为 `[model.<id>]` 直接带 base_url），我们的写法来自 1.0.40 实测且同版复测通过，存在未来版本变更风险。models.dev 数据源级佐证（2026-09-29）：xai 模型 effort 值域为 low/medium/high/xhigh（grok-4.3 另含 none），无 max——与「Max 档映射写 xhigh」的既有处置一致。
+- Grok：`default_reasoning_effort` 值域与 `reasoning_efforts` 菜单语义已按 1.0.92 实测（2026-11-26，见验证文档）：value 只接受 none/minimal/low/medium/high/xhigh/max，且默认档必须在该模型菜单内；`supports_reasoning_effort` 已 deprecated。`[model_providers]` 表 + `model_provider` 字段官方文档未记载（官方简化式为 `[model.<id>]` 直接带 base_url），我们的写法来自 1.0.40 实测且同版复测通过，存在未来版本变更风险。
 - 各聚合平台模型列表接口差异（`/v1/models` 形态、鉴权头）。
 - ~~models.dev `reasoning_options` 取值与各工具等级的映射表~~ 已查证（2026-09-29）：models.dev 不提供跨工具映射，只按 `{type: effort|budget_tokens|toggle}` 三形态记录各模型原始值域——anthropic 新模型 effort 为 low/medium/high/xhigh/max（opus-4.5/4.6 等 early 款是 low/medium/high 或 +max）、xai 为 low/medium/high/xhigh、openai 各模型不一（none/minimal 起步、max 仅最新款）；budget_tokens 仅 `min: 1024`（anthropic 旧模型）；`toggle` 即开/关（sonnet-5）。与 Reins 归一化档位的对应：effort 各档同名对应，`toggle`≈off；`minimal` 仅 openai 系部分模型（gpt-5-mini / gpt-5-nano）有同名值，anthropic 无。
 

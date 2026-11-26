@@ -2,6 +2,7 @@
 
 - 背景：Pi 的 subagent 扩展从项目级自研脚本（`$HOME/projects/.pi/extensions/subagent/`，已删除）换成 npm 包 `npm:@tintinweb/pi-subagents`（`~/.pi/agent/settings.json` 的 `packages` 声明，装在 `~/.pi/agent/npm/node_modules/`）。同一扩展的两代版本并存过：旧版（工具名 `subagent`，workflow/async 模式，止于 2026-10-23）与新版 v0.22+（工具名 `Agent`，始于 2026-10-26）。切换点：旧格式 `toolName=subagent` 的会话止于 10-23，新格式 `toolName=Agent` 从 10-26 起。
 - 结论用途：Reins 对 Pi 子代理数据的解析（family 归族实现见 `decisions/2026-10-29-pi-family-aggregation.md`）。
+- 2026-11-19 迁移注记：文中 `pi.rs` 为 Rust 时代 reader；现行实现在 `internal/session/pi.go`，扩展数据形状结论不变。
 
 ## 数据形状全景（两代版本、四个落点）
 
