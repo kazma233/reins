@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import ConfirmDialog from "@shared/ui/ConfirmDialog.vue";
 import DialogShell from "@shared/ui/DialogShell.vue";
 import { extractErrorMessage } from "@shared/lib/errors";
 import { fetchProviderModelsDirect } from "../../api";
@@ -14,8 +13,7 @@ type ProviderFetchModelsDialogProps = {
   // 拉取用表单当前值（含未保存的改动）：编辑态若读 providers.yaml 里已保存的
   // 那一份，用户刚改的 Base URL / 协议 / Key 就不会生效。
   apiKey: string;
-  // 当前模型目录里已有的模型 ID：命中者以勾选状态展示且不可取消，默认不加入；
-  // 点击时弹窗提示已存在。
+  // 当前模型目录里已有的模型 ID：命中者以勾选且禁用的状态展示，不可重复加入。
   existingIds: string[];
 };
 
@@ -31,8 +29,6 @@ const errorText = ref("");
 const models = ref<FetchedModel[]>([]);
 const fetchedUrl = ref("");
 const selected = ref<Record<string, boolean>>({});
-// 点击已加入条目时展示的提示，内容是命中的模型 ID。
-const duplicatePromptId = ref("");
 
 watch(
   () => props.open,
@@ -42,7 +38,6 @@ watch(
       fetchedUrl.value = "";
       selected.value = {};
       errorText.value = "";
-      duplicatePromptId.value = "";
       void runFetch();
     }
   }
@@ -122,26 +117,10 @@ function confirm() {
           <span>{{ model.id }}<template v-if="model.name"> · {{ model.name }}</template></span>
         </label>
         <label v-else class="providers-fetched-item providers-fetched-item--existing">
-          <input
-            type="checkbox"
-            :checked="true"
-            @click.prevent="duplicatePromptId = model.id"
-          />
+          <input type="checkbox" :checked="true" disabled />
           <span>{{ model.id }}<template v-if="model.name"> · {{ model.name }}</template></span>
         </label>
       </template>
     </div>
-
-    <ConfirmDialog
-      :open="duplicatePromptId !== ''"
-      title-id="provider-fetch-duplicate-title"
-      eyebrow="模型目录"
-      title="模型已在目录中"
-      :description="`「${duplicatePromptId}」已在当前模型目录里，无需重复加入。`"
-      confirm-label="知道了"
-      confirm-button-class-name="primary-button"
-      @close="duplicatePromptId = ''"
-      @confirm="duplicatePromptId = ''"
-    />
   </DialogShell>
 </template>
