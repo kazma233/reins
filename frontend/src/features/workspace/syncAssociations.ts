@@ -1,4 +1,4 @@
-import { SkillLinkState, type SkillLinkAssociation, type SkillSourceConfigView, type SyncTargetOption } from "./types";
+import { SkillLinkState, type SkillLinkAssociation, type SkillSourceConfigView, type SyncPathOption } from "./types";
 
 export type SkillLinkStateInfo = {
   label: string;
@@ -72,28 +72,33 @@ export function hasCurrentSourceSkillLinks(
   );
 }
 
-// 落点是软链接的 target：那个目录不属于它，内容由链接另一端负责，因此不参与
-// 同步选择。判定只看「是不是链接」——能叫出归属（linkedTargetId）与叫不出
-// （协议目录、外部目录、断链）一样不可选，后者此前会静默失效。
-export function skillDirIsAlias(target: SyncTargetOption): boolean {
-  return Boolean(target.skillDirLinkTarget ?? target.linkedTargetId);
+// 目录是软链接的路径：那个目录不属于它，内容由链接另一端负责，因此不参与
+// 同步选择。判定只看「是不是链接」——能叫出归属（linkedPathId）与叫不出
+// （外部目录、断链）一样不可选，后者此前会静默失效。
+export function skillDirIsAlias(path: SyncPathOption): boolean {
+  return Boolean(path.dirLinkTarget ?? path.linkedPathId);
 }
 
-// 能被勾选的 target：落点是软链接（整目录继承或指向别处）的都不参与同步选择。
-export function isSelectableSyncTarget(target: SyncTargetOption): boolean {
-  return !skillDirIsAlias(target);
+// 能被勾选的路径：目录是软链接（内容归另一条路径或外部）的都不参与同步选择。
+export function isSelectableSyncPath(path: SyncPathOption): boolean {
+  return !skillDirIsAlias(path);
 }
 
-// 打开同步弹窗时的 targets 预选：只挑已经装了当前来源内容的那批（列表里带
-// 「关联」标签的 target），让用户接着把来源新增的 skill 补过去，不用每次重新勾。
-export function defaultSelectedSyncTargetIds(
-  targets: SyncTargetOption[],
+// 可勾选路径的 id 列表：同步弹窗与路径分组组件的全选/计数共用同一份判定。
+export function selectableSyncPathIds(paths: SyncPathOption[]): string[] {
+  return paths.filter(isSelectableSyncPath).map((path) => path.name);
+}
+
+// 打开同步弹窗时的路径预选：只挑已经装了当前来源内容的那批（列表里带
+// 「关联」标签的路径），让用户接着把来源新增的 skill 补过去，不用每次重新勾。
+export function defaultSelectedSyncPathIds(
+  paths: SyncPathOption[],
   currentSourceId?: string,
 ): string[] {
-  return targets
-    .filter(isSelectableSyncTarget)
-    .filter((target) => hasCurrentSourceSkillLinks(target.links ?? [], currentSourceId))
-    .map((target) => target.id);
+  return paths
+    .filter(isSelectableSyncPath)
+    .filter((path) => hasCurrentSourceSkillLinks(path.links ?? [], currentSourceId))
+    .map((path) => path.name);
 }
 
 // 只有非受管来源的链接可以逐条移除：它们不属于任何已配置来源，没有来源级的

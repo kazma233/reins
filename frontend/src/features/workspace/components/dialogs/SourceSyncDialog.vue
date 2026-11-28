@@ -2,25 +2,25 @@
 import { computed, ref, watch } from "vue";
 import {
   cancelSkillSourceFetch,
+  getSyncPathOptions,
   getSyncSkillOptions,
-  getSyncTargetOptions,
   refreshGitSkillSource,
+  removeSkillPathLink,
   removeSourceSync,
-  removeTargetSkillLink,
 } from "../../api";
 import { extractErrorMessage } from "@shared/lib/errors";
 import AppTooltip from "@shared/ui/AppTooltip.vue";
 import ConfirmDialog from "@shared/ui/ConfirmDialog.vue";
 import DialogShell from "@shared/ui/DialogShell.vue";
-import SyncTargetGroups from "../SyncTargetGroups.vue";
+import SyncPathGroups from "../SyncPathGroups.vue";
 import { useWorkspaceAction } from "../../composables/useWorkspaceAction";
 import type { WorkspaceStateContext } from "../../composables/useWorkspaceState";
-import { defaultSelectedSyncTargetIds, isSelectableSyncTarget } from "../../syncAssociations";
+import { defaultSelectedSyncPathIds, selectableSyncPathIds } from "../../syncAssociations";
 import type {
   SkillLinkAssociation,
   SkillSourceConfigView,
+  SyncPathOption,
   SyncSkillOption,
-  SyncTargetOption,
 } from "../../types";
 
 type SourceSyncSnapshot = {
@@ -40,7 +40,7 @@ const props = defineProps<SourceSyncDialogProps>();
 
 const emit = defineEmits<{
   close: [];
-  confirm: [skillPaths: string[], targetIds: string[], snapshot: SourceSyncSnapshot];
+  confirm: [skillPaths: string[], pathIds: string[], snapshot: SourceSyncSnapshot];
 }>();
 
 // 写操作刷新的是 Workspace 根组件持有的同一份状态,经 props 传入。
@@ -57,10 +57,10 @@ const confirming = ref(false);
 const removingSync = ref(false);
 const removingDestination = ref<string | null>(null);
 const refreshingSource = ref(false);
-const targets = ref<SyncTargetOption[]>([]);
+const paths = ref<SyncPathOption[]>([]);
 const skills = ref<SyncSkillOption[]>([]);
 const selectedSkillPaths = ref<Set<string>>(new Set());
-const selectedTargetIds = ref<Set<string>>(new Set());
+const selectedPathIds = ref<Set<string>>(new Set());
 const skillSearch = ref("");
 const showUnmatched = ref(false);
 const sourceRoot = ref("");
@@ -77,20 +77,16 @@ function reportResult(result: { text: string; failed: boolean } | null) {
 
 defineExpose({ reportResult });
 
-function getSelectableTargetIds(list: SyncTargetOption[]): string[] {
-  return list.filter(isSelectableSyncTarget).map((t) => t.id);
-}
-
 // 递增令牌作废旧请求：关闭弹窗或切换来源后，在途响应不得再写回状态。
 let loadToken = 0;
 
 // 列表、勾选与来源路径一起清空，调用方保证之后会重新读一遍。
 function clearOptions() {
-  targets.value = [];
+  paths.value = [];
   skills.value = [];
   sourceRoot.value = "";
   selectedSkillPaths.value = new Set();
-  selectedTargetIds.value = new Set();
+  selectedPathIds.value = new Set();
 }
 
 // keepExistingOptions 只给「强制拉取」用：拉取后重扫时保留当前列表，
@@ -109,12 +105,12 @@ async function refreshOptions({ keepExistingOptions = false }: { keepExistingOpt
   }
 
   try {
-    const [targetOptions, skillResult] = await Promise.all([
-      getSyncTargetOptions(),
+    const [pathOptions, skillResult] = await Promise.all([
+      getSyncPathOptions(),
       getSyncSkillOptions(source.id),
     ]);
     if (token !== loadToken) return;
-    targets.value = targetOptions;
+    paths.value = pathOptions;
     skills.value = skillResult.skills ?? [];
     sourceRoot.value = skillResult.sourceRoot;
     skillSearch.value = "";
@@ -127,7 +123,7 @@ async function refreshOptions({ keepExistingOptions = false }: { keepExistingOpt
     // targets 同理预选已装当前来源的那批，让用户接着补同步；其余留空，
     // 保持「没勾就不动」的边界。
     if (!keepExistingOptions) {
-      selectedTargetIds.value = new Set(defaultSelectedSyncTargetIds(targetOptions, source.id));
+      selectedPathIds.value = new Set(defaultSelectedSyncPathIds(pathOptions, source.id));
     }
   } catch (error) {
     if (token !== loadToken) return;
@@ -157,20 +153,20 @@ function handleToggleSkill(path: string) {
   selectedSkillPaths.value = next;
 }
 
-function handleToggleTarget(id: string) {
-  const next = new Set(selectedTargetIds.value);
+function handleTogglePath(id: string) {
+  const next = new Set(selectedPathIds.value);
   if (next.has(id)) next.delete(id);
   else next.add(id);
-  selectedTargetIds.value = next;
+  selectedPathIds.value = next;
 }
 
-function handleSetTargets(targetIds: string[], selected: boolean) {
-  const next = new Set(selectedTargetIds.value);
-  for (const id of targetIds) {
+function handleSetPaths(pathIds: string[], selected: boolean) {
+  const next = new Set(selectedPathIds.value);
+  for (const id of pathIds) {
     if (selected) next.add(id);
     else next.delete(id);
   }
-  selectedTargetIds.value = next;
+  selectedPathIds.value = next;
 }
 
 const query = computed(() => skillSearch.value.trim().toLowerCase());
@@ -185,12 +181,12 @@ const visibleMatched = computed(() => matchedSkills.value.filter(matchesQuery));
 const visibleUnmatched = computed(() => unmatchedSkills.value.filter(matchesQuery));
 const visibleSkills = computed(() => [...visibleMatched.value, ...visibleUnmatched.value]);
 
-const selectableTargetIds = computed(() => getSelectableTargetIds(targets.value));
+const selectablePathIds = computed(() => selectableSyncPathIds(paths.value));
 const allSkillsSelected = computed(
   () => visibleSkills.value.length > 0 && visibleSkills.value.every((s) => selectedSkillPaths.value.has(s.relativePath)),
 );
-const allTargetsSelected = computed(
-  () => selectableTargetIds.value.length > 0 && selectedTargetIds.value.size === selectableTargetIds.value.length,
+const allPathsSelected = computed(
+  () => selectablePathIds.value.length > 0 && selectedPathIds.value.size === selectablePathIds.value.length,
 );
 const busy = computed(
   () =>
@@ -202,9 +198,9 @@ const busy = computed(
     props.loading,
 );
 const canConfirm = computed(
-  () => selectedSkillPaths.value.size > 0 && selectedTargetIds.value.size > 0 && !busy.value && !loadError.value,
+  () => selectedSkillPaths.value.size > 0 && selectedPathIds.value.size > 0 && !busy.value && !loadError.value,
 );
-const canRemoveSync = computed(() => selectedTargetIds.value.size > 0 && !busy.value);
+const canRemoveSync = computed(() => selectedPathIds.value.size > 0 && !busy.value);
 const isGitSource = computed(() => props.source?.type === "git");
 const canRefreshSource = computed(() => isGitSource.value && !busy.value);
 // 网络拉取在途：git 来源的选项读取（缓存过期会拉远端）或强制拉取。
@@ -240,12 +236,12 @@ function handleDeselectAllSkills() {
   selectedSkillPaths.value = new Set();
 }
 
-function handleSelectAllTargets() {
-  selectedTargetIds.value = new Set(selectableTargetIds.value);
+function handleSelectAllPaths() {
+  selectedPathIds.value = new Set(selectablePathIds.value);
 }
 
-function handleDeselectAllTargets() {
-  selectedTargetIds.value = new Set();
+function handleDeselectAllPaths() {
+  selectedPathIds.value = new Set();
 }
 
 function handleConfirm() {
@@ -255,7 +251,7 @@ function handleConfirm() {
     emit(
       "confirm",
       Array.from(selectedSkillPaths.value),
-      Array.from(selectedTargetIds.value),
+      Array.from(selectedPathIds.value),
       {
         sourceRoot: sourceRoot.value,
         skills: skills.value.filter((skill) =>
@@ -270,11 +266,11 @@ function handleConfirm() {
 
 // 后端按「链接目标落在来源目录下」判定归属，前端用 matchedSourceIds 做同一判定，
 // 直接改内存里的目标列表，避免重新扫描（弹窗与各面板会闪一下加载态）。
-function dropLinks(targetIds: Set<string>, shouldDrop: (link: SkillLinkAssociation) => boolean) {
-  targets.value = targets.value.map((target) =>
-    targetIds.has(target.id)
-      ? { ...target, links: (target.links ?? []).filter((link) => !shouldDrop(link)) }
-      : target,
+function dropLinks(pathIds: Set<string>, shouldDrop: (link: SkillLinkAssociation) => boolean) {
+  paths.value = paths.value.map((path) =>
+    pathIds.has(path.name)
+      ? { ...path, links: (path.links ?? []).filter((link) => !shouldDrop(link)) }
+      : path,
   );
 }
 
@@ -283,15 +279,15 @@ function dropLinks(targetIds: Set<string>, shouldDrop: (link: SkillLinkAssociati
 // 后端回执(每条带精确的 destination)就是删除事实,就地更新按它过滤;
 // 归属判定(matchedSourceIds)只留给预选等纯展示用途,不再用来重推后端
 // 删了什么——两条口径一旦分叉,列表就会与盘上事实静默不一致。
-// destination 含 target 自己的 skills 目录,全局唯一,单键足够。
+// destination 含路径自己的 skills 目录,全局唯一,单键足够。
 async function handleRemoveSync() {
   const source = props.source;
-  if (!source || selectedTargetIds.value.size === 0) return;
-  const removedTargetIds = new Set(selectedTargetIds.value);
+  if (!source || selectedPathIds.value.size === 0) return;
+  const removedPathIds = new Set(selectedPathIds.value);
 
   removingSync.value = true;
   await runWorkspaceAction({
-    action: () => removeSourceSync(source.id, Array.from(removedTargetIds)),
+    action: () => removeSourceSync(source.id, Array.from(removedPathIds)),
     error: `移除 ${source.label} 同步失败。`,
     onSuccess: (result) => {
       const removed = result.removed ?? [];
@@ -302,7 +298,7 @@ async function handleRemoveSync() {
             : "没有需要移除的软链接。",
         failed: false,
       });
-      dropLinks(removedTargetIds, (link) =>
+      dropLinks(removedPathIds, (link) =>
         removed.some((item) => item.destinationPath === link.destinationPath),
       );
     },
@@ -313,14 +309,14 @@ async function handleRemoveSync() {
   removingSync.value = false;
 }
 
-async function handleRemoveLink(targetId: string, destinationPath: string) {
+async function handleRemoveLink(pathName: string, destinationPath: string) {
   removingDestination.value = destinationPath;
   await runWorkspaceAction({
-    action: () => removeTargetSkillLink(targetId, destinationPath),
+    action: () => removeSkillPathLink(pathName, destinationPath),
     error: "移除软链接失败。",
     onSuccess: (item) => {
       reportResult({ text: `已移除 ${item.skillName} 的软链接。`, failed: false });
-      dropLinks(new Set([targetId]), (link) => link.destinationPath === destinationPath);
+      dropLinks(new Set([pathName]), (link) => link.destinationPath === destinationPath);
     },
     onError: (message) => {
       reportResult({ text: message, failed: true });
@@ -382,7 +378,7 @@ async function handleRefreshSource() {
         type="button"
         @click="handleRemoveSync"
       >
-        {{ removingSync ? "移除中..." : `移除同步 (${selectedTargetIds.size})` }}
+        {{ removingSync ? "移除中..." : `移除同步 (${selectedPathIds.size})` }}
       </button>
       <button class="primary-button" :disabled="!canConfirm" type="button" @click="handleConfirm">
         {{ confirming ? "同步中..." : "开始同步" }}
@@ -509,40 +505,40 @@ async function handleRefreshSource() {
         <div class="manager-sync-column">
           <div class="manager-sync-column__header">
             <h3 class="manager-sync-column__title">
-              Targets ({{ selectedTargetIds.size }}/{{ selectableTargetIds.length }})
+              技能路径 ({{ selectedPathIds.size }}/{{ selectablePathIds.length }})
             </h3>
             <div class="manager-sync-column__actions">
               <button
                 class="secondary-button manager-sync-column__action"
-                :disabled="allTargetsSelected"
+                :disabled="allPathsSelected"
                 type="button"
-                @click="handleSelectAllTargets"
+                @click="handleSelectAllPaths"
               >
               全选
               </button>
               <button
                 class="secondary-button manager-sync-column__action"
-                :disabled="selectedTargetIds.size === 0"
+                :disabled="selectedPathIds.size === 0"
                 type="button"
-                @click="handleDeselectAllTargets"
+                @click="handleDeselectAllPaths"
               >
               取消全选
               </button>
             </div>
           </div>
-          <template v-if="targets.length">
-            <SyncTargetGroups
+          <template v-if="paths.length">
+            <SyncPathGroups
               :busy="busy"
               :current-source-id="source?.id"
               :source-labels="sourceLabels"
-              :selected-target-ids="selectedTargetIds"
-              :targets="targets"
+              :selected-path-ids="selectedPathIds"
+              :paths="paths"
               @remove-link="handleRemoveLink"
-              @set-targets="handleSetTargets"
-              @toggle-target="handleToggleTarget"
+              @set-paths="handleSetPaths"
+              @toggle-path="handleTogglePath"
             />
           </template>
-          <div v-else class="empty-state">没有可用的 targets。</div>
+          <div v-else class="empty-state">没有可用的技能路径。</div>
         </div>
       </div>
     </template>

@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { SkillLinkState, type SkillLinkAssociation, type SyncTargetOption } from "./types";
+import { SkillLinkState, type SkillLinkAssociation, type SyncPathOption } from "./types";
 import {
   buildSkillLinkSourceLabels,
   canRemoveSkillLink,
-  defaultSelectedSyncTargetIds,
+  defaultSelectedSyncPathIds,
   hasCurrentSourceSkillLinks,
   hasUnmanagedSkillLinks,
-  isSelectableSyncTarget,
+  isSelectableSyncPath,
   pendingSkillLinkCleanupCount,
   skillLinkSourceLabel,
   skillLinkSourcePath,
@@ -24,19 +24,19 @@ function makeLink(state: SkillLinkAssociation["state"], matchedSourceIds: string
   };
 }
 
-function makeTarget(overrides: Partial<SyncTargetOption> & { id: string }): SyncTargetOption {
-  const separator = overrides.id.indexOf(":");
+function makePath(overrides: Partial<SyncPathOption> & { name: string }): SyncPathOption {
   // overrides 展开在前：未覆盖的键保持缺席，下游断言依赖这个运行时形态。
-  const target = {
-    projectId: separator > 0 ? overrides.id.slice(0, separator) : null,
-    agentId: separator > 0 ? overrides.id.slice(separator + 1) : overrides.id,
-    label: overrides.id,
-    skillDir: `/targets/${overrides.id}`,
+  const path = {
+    dir: `/paths/${overrides.name}`,
+    dirLinkTarget: null,
+    linkedPathId: null,
     links: [],
     ...overrides,
   };
-  return target as SyncTargetOption;
+  return path as SyncPathOption;
 }
+
+
 
 describe("skill link association presentation", () => {
   it("labels every scanned link state", () => {
@@ -97,7 +97,7 @@ describe("skill link association presentation", () => {
     );
   });
 
-  it("detects target-level unmanaged and current-source tags", () => {
+  it("detects path-level unmanaged and current-source tags", () => {
     const links = [
       makeLink(SkillLinkState.LinkStateUnmanaged),
       makeLink(SkillLinkState.LinkStateExcluded, ["source-a"]),
@@ -109,35 +109,35 @@ describe("skill link association presentation", () => {
     expect(hasCurrentSourceSkillLinks(links)).toBe(false);
   });
 
-  it("marks alias skill dirs as unselectable", () => {
-    expect(isSelectableSyncTarget(makeTarget({ id: "plain" }))).toBe(true);
-    expect(isSelectableSyncTarget(makeTarget({ id: "inherited", linkedTargetId: "plain" }))).toBe(false);
-    // 链接另一端不是受管 target（外部目录）时 linkedTargetId 为空，但落点同样是
+  it("marks alias dirs as unselectable", () => {
+    expect(isSelectableSyncPath(makePath({ name: "plain" }))).toBe(true);
+    expect(isSelectableSyncPath(makePath({ name: "inherited", linkedPathId: "plain" }))).toBe(false);
+    // 链接另一端不是受管路径（外部目录）时 linkedPathId 为空，但目录同样是
     // 别名——此前它会保持可选，勾了之后后端静默跳过（用户可见的静默失效）。
-    expect(isSelectableSyncTarget(makeTarget({ id: "external", skillDirLinkTarget: "/external/skills" }))).toBe(false);
+    expect(isSelectableSyncPath(makePath({ name: "external", dirLinkTarget: "/external/skills" }))).toBe(false);
     // 断链：canonicalize 失败时后端回落为解析出的原路径，仍有值。
-    const broken = makeTarget({ id: "broken", skillDirLinkTarget: "/gone/skills" });
-    expect(isSelectableSyncTarget(broken)).toBe(false);
+    const broken = makePath({ name: "broken", dirLinkTarget: "/gone/skills" });
+    expect(isSelectableSyncPath(broken)).toBe(false);
     // 界面只显示链接目的地（属主名字那一层翻译已去掉）。
-    expect(broken.skillDirLinkTarget).toBe("/gone/skills");
-    expect(makeTarget({ id: "plain" }).skillDirLinkTarget).toBeUndefined();
+    expect(broken.dirLinkTarget).toBe("/gone/skills");
+    expect(makePath({ name: "plain" }).dirLinkTarget).toBeNull();
   });
 
-  it("preselects selectable targets already linked to the current source", () => {
+  it("preselects selectable paths already linked to the current source", () => {
     const targets = [
-      makeTarget({ id: "linked", links: [makeLink(SkillLinkState.LinkStateLinked, ["source-a"])] }),
-      makeTarget({
-        id: "cleanup",
+      makePath({ name: "linked", links: [makeLink(SkillLinkState.LinkStateLinked, ["source-a"])] }),
+      makePath({
+        name: "cleanup",
         links: [makeLink(SkillLinkState.LinkStateExcluded, ["source-a"]), makeLink(SkillLinkState.LinkStateSourceMissed, ["source-a"])],
       }),
-      makeTarget({ id: "other-source", links: [makeLink(SkillLinkState.LinkStateLinked, ["source-b"])] }),
-      makeTarget({ id: "unmanaged", links: [makeLink(SkillLinkState.LinkStateUnmanaged)] }),
-      makeTarget({ id: "empty" }),
-      makeTarget({ id: "inherited", linkedTargetId: "linked", links: [makeLink(SkillLinkState.LinkStateLinked, ["source-a"])] }),
+      makePath({ name: "other-source", links: [makeLink(SkillLinkState.LinkStateLinked, ["source-b"])] }),
+      makePath({ name: "unmanaged", links: [makeLink(SkillLinkState.LinkStateUnmanaged)] }),
+      makePath({ name: "empty" }),
+      makePath({ name: "inherited", linkedPathId: "linked", links: [makeLink(SkillLinkState.LinkStateLinked, ["source-a"])] }),
     ];
 
-    expect(defaultSelectedSyncTargetIds(targets, "source-a")).toEqual(["linked", "cleanup"]);
-    expect(defaultSelectedSyncTargetIds(targets)).toEqual([]);
+    expect(defaultSelectedSyncPathIds(targets, "source-a")).toEqual(["linked", "cleanup"]);
+    expect(defaultSelectedSyncPathIds(targets)).toEqual([]);
   });
 
   it("allows removing only unmanaged links one by one", () => {

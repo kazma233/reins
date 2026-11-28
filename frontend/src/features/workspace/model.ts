@@ -1,118 +1,26 @@
-import { AGENT_LABELS } from "@shared/lib/agent-labels";
 import type {
-  AgentTargetId,
-  McpTargetPreviewResult,
-  McpTransport,
   BatchGitSkillImportResult,
   SkillDiscoveryResult,
   SkillSourceConfigView,
   SkillSourceKind,
-
 } from "./types";
+import { McpTransport } from "./types";
 
 export const WORKSPACE_TAB_COPY = [
   {
-    id: "targets",
-    label: "targets",
-    title: "分发目标",
-    hint: "每个工具的配置位置，分全局和项目两级",
-  },
-  {
     id: "skills",
     label: "skills",
-    title: "技能来源",
-    hint: "从 git 仓库或本地目录找到 skill，装到各个工具里",
+    title: "技能分发",
+    hint: "把 skill 以目录链接装进各个技能路径；来源与落点互不绑定",
   },
   {
     id: "mcp",
     label: "mcp",
     title: "MCP 服务",
-    hint: "集中管理 MCP 服务，写进各个工具的配置文件",
+    hint: "集中管理 MCP 服务，同步弹窗把勾选的服务收敛进各条 MCP 路径的配置文件",
   },
 ] as const;
 
-// agent 名按统一的产品名渲染（生成物，与历史会话来源、providers 同一份
-// 常量）；target id 即规范键，未知 id（用户自定义 target）原样返回。
-export function formatTargetName(agentId: string): string {
-  return AGENT_LABELS[agentId] ?? agentId;
-}
-
-// target 地址的拆分点：全局 target 是纯 agent id，项目 target 是
-// `projectId:agentId`。任何需要「从地址取两段」的地方都走这里——此前
-// formatTargetLabel 与 McpPanel 各拆一遍，拆法一旦不同就会静默错位。
-//
-// 口径以后端 TargetRef::parse 为准：只在第一个 `:` 处切一次，两段都必须非空；
-// 任一段为空（`:codex` / `demo:` / `:`）时整串按全局地址处理。第二段不再校验
-// 是否含 `:`（`a:b:codex` 在后端就是项目 `a` 里的 agent `b:codex`）。前端不得
-// 自己放宽或收紧，否则同一个 id 在前后端会落到不同分组。
-export type TargetAddress = {
-  projectId: string | null;
-  agentId: string;
-};
-
-export function parseTargetId(targetId: AgentTargetId): TargetAddress {
-  const colonPos = targetId.indexOf(":");
-  if (colonPos < 0) {
-    return { projectId: null, agentId: targetId };
-  }
-  const projectId = targetId.slice(0, colonPos);
-  const agentId = targetId.slice(colonPos + 1);
-  if (!projectId || !agentId) {
-    return { projectId: null, agentId: targetId };
-  }
-  return { projectId, agentId };
-}
-
-// 地址的正向拼装:与 parseTargetId 互逆,组成同一对格式所有者。此前
-// `${projectId}:${agentId}` 手拼散在五处,格式知识(第一个 `:` 是分隔符)
-// 只在拆分侧可见——后端 validate_project_id 禁 `:` 的保证在拼装处不可见。
-export function formatTargetId(projectId: string, agentId: string): AgentTargetId {
-  return `${projectId}:${agentId}` as AgentTargetId;
-}
-
-// target id 的展示形式：全局 target 就是 agent 名，
-// 项目 target 带项目前缀，两者都用展示名而不是配置里的原始 id。
-export function formatTargetLabel(targetId: AgentTargetId) {
-  const { projectId, agentId } = parseTargetId(targetId);
-  const name = formatTargetName(agentId);
-  return projectId === null ? name : `${projectId}/${name}`;
-}
-
-export type TargetGroup = {
-  key: string;
-  label: string;
-  targetIds: AgentTargetId[];
-};
-
-// 目标按项目分组：项目 target 各归自己的 project，全局 target 单独一组。
-// 分组顺序跟随入参（配置里的安装顺序），全局组始终在最前。
-export function groupTargetIds(targetIds: AgentTargetId[]): TargetGroup[] {
-  const globalTargets: AgentTargetId[] = [];
-  const projectGroups = new Map<string, AgentTargetId[]>();
-  for (const targetId of targetIds) {
-    // 分组只看地址本身：不再先格式化成 `project/名称` 再按 `/` 反推项目名
-    // （那层反解析依赖展示格式，agent 名里一旦出现 `/` 就会归错组）。
-    const { projectId } = parseTargetId(targetId);
-    if (projectId === null) {
-      globalTargets.push(targetId);
-      continue;
-    }
-    const agents = projectGroups.get(projectId) ?? [];
-    agents.push(targetId);
-    projectGroups.set(projectId, agents);
-  }
-  return [
-    { key: "global", label: "全局", targetIds: globalTargets },
-    ...[...projectGroups].map(([projectId, targets]) => ({
-      key: projectId,
-      label: projectId,
-      targetIds: targets,
-    })),
-  ].filter((group) => group.targetIds.length > 0);
-}
-
-// 七个内置工具的稳定 target id 契约；具体的创建预设（路径/prefix/configType）
-// 由后端 get_target_presets 下发，前端不再静态维护。
 export type SkillSourceFilter = "all" | "new" | `source:${string}`;
 
 export type SkillTargetToggleKind = "install" | "replace" | "uninstall";
@@ -171,20 +79,21 @@ export type SkillSourceEditDialogState = {
   preview: SkillDiscoveryPreviewState;
 } & SkillSourcePreviewDraft;
 
-export type TargetDeleteDialogState = {
-  open: boolean;
-  loading: boolean;
-  error: string | null;
-  targetId: string | null;
+// 技能路径表单：条目名用户自由命名，目录可从预设回填或手填。
+export type SkillPathFormState = {
+  originalName: string | null;
+  name: string;
+  dir: string;
+  errors: FieldErrors;
 };
 
-export type TargetFormState = {
-  originalTargetId: string | null;
-  targetId: string;
-  skillDir: string;
+// MCP 路径表单：configType 创建时选定（预设带入或手选），更新保留存量值。
+export type McpPathFormState = {
+  originalName: string | null;
+  name: string;
   configPath: string;
-  mcpConfigPrefix: string;
-  // 字段级校验错误：提交时一次算出全部，字段值变化时清空该字段。
+  configType: string;
+  configPrefix: string;
   errors: FieldErrors;
 };
 
@@ -197,14 +106,22 @@ export type McpDeleteDialogState = {
   serverNames: string[];
 };
 
-export type McpApplyPreviewDialogState = {
+export type SkillPathDeleteDialogState = {
   open: boolean;
   loading: boolean;
-  submitting: boolean;
   error: string | null;
-  serverName: string;
-  targetId: AgentTargetId | null;
-  preview: McpTargetPreviewResult | null;
+  pathId: string | null;
+  // 删除清理预演：将一并卸载的受管链接清单。
+  cleanupPreview: string[] | null;
+};
+
+export type McpPathDeleteDialogState = {
+  open: boolean;
+  loading: boolean;
+  error: string | null;
+  pathId: string | null;
+  // 删除清理预演：将一并移除的 MCP 条目名。
+  cleanupServerNames: string[] | null;
 };
 
 export function parseCommaSeparatedList(value: string): string[] {
@@ -285,74 +202,32 @@ export function createSkillDiscoveryPreviewState(): SkillDiscoveryPreviewState {
   };
 }
 
-export const DEFAULT_TARGET_FORM: TargetFormState = {
-  originalTargetId: null,
-  targetId: "",
-  skillDir: "",
+export const DEFAULT_SKILL_PATH_FORM: SkillPathFormState = {
+  originalName: null,
+  name: "",
+  dir: "",
+  errors: {},
+};
+
+export const DEFAULT_MCP_PATH_FORM: McpPathFormState = {
+  originalName: null,
+  name: "",
   configPath: "",
-  mcpConfigPrefix: "",
+  configType: "",
+  configPrefix: "",
   errors: {},
 };
 
-export const DEFAULT_MCP_APPLY_PREVIEW_DIALOG: McpApplyPreviewDialogState = {
-  open: false,
-  loading: false,
-  submitting: false,
-  error: null,
-  serverName: "",
-  targetId: null,
-  preview: null,
-};
-
-export type ProjectFormState = {
-  originalProjectId: string | null;
-  projectId: string;
-  path: string;
-  agents: string[];
-  errors: FieldErrors;
-};
-
-export const DEFAULT_PROJECT_FORM: ProjectFormState = {
-  originalProjectId: null,
-  projectId: "",
-  path: "",
-  // 新增项目不预选 agent：分发到哪些 agent 由用户显式选择，
-  // 不替用户预设一个他可能没装的目标。
-  agents: [],
-  errors: {},
-};
-
-export type ProjectDeleteDialogState = {
-  open: boolean;
-  loading: boolean;
-  error: string | null;
-  projectId: string | null;
-};
-
-export type ProjectAgentPickerDialogState = {
-  open: boolean;
-  loading: boolean;
-  contextName: string;
-  projectId: string | null;
-  serverName: string | null;
-  // 当前 mcp 的 transport；pi 不支持 sse，弹窗据此置灰 pi 按钮。
-  transport: McpTransport | null;
-  // 期望终态：应用后应安装该 mcp 的复合目标 id（projectId:agentId）
-  desiredAgentIds: AgentTargetId[];
-  confirmOpen: boolean;
-};
-
-export const DEFAULT_PROJECT_AGENT_PICKER_DIALOG: ProjectAgentPickerDialogState = {
-  open: false,
-  loading: false,
-  contextName: "",
-  projectId: null,
-  serverName: null,
-  transport: null,
-  desiredAgentIds: [],
-  confirmOpen: false,
-};
-
-export function createProjectAgentPickerDialogState(): ProjectAgentPickerDialogState {
-  return { ...DEFAULT_PROJECT_AGENT_PICKER_DIALOG };
+// transport 的展示名（MCP 卡片与 MCP 路径弹窗共用）。
+export function formatMcpTransport(transport: McpTransport): string {
+  switch (transport) {
+    case McpTransport.TransportStdio:
+      return "本地命令（stdio）";
+    case McpTransport.TransportHTTP:
+      return "HTTP";
+    case McpTransport.TransportSSE:
+      return "SSE";
+    default:
+      return transport;
+  }
 }

@@ -1,19 +1,10 @@
-import { computed, reactive, ref } from "vue";
+import { reactive } from "vue";
 import {
-  applyMcpToTarget,
   createWorkspaceMcp,
   deleteWorkspaceMcp,
-  previewMcpTarget,
-  removeMcpFromTarget,
   updateWorkspaceMcp,
 } from "../api";
-import {
-  DEFAULT_MCP_APPLY_PREVIEW_DIALOG,
-  formatTargetLabel,
-  type FieldErrors,
-  type McpApplyPreviewDialogState,
-  type McpDeleteDialogState,
-} from "../model";
+import { type McpDeleteDialogState } from "../model";
 import {
   buildMcpErrors,
   buildMcpPayload,
@@ -22,8 +13,7 @@ import {
   type McpFormPayload,
   type McpFormState,
 } from "../mcpForm";
-import { McpTargetState, type AgentTargetId, type McpConfigView } from "../types";
-import { extractErrorMessage } from "@shared/lib/errors";
+import { McpPathState, type McpConfigView } from "../types";
 import { useWorkspaceAction } from "./useWorkspaceAction";
 import type { WorkspaceStateContext } from "./useWorkspaceState";
 
@@ -34,15 +24,7 @@ type McpSyncConfirmDialogState = {
   originalName: string;
   nextName: string;
   payload: McpFormPayload | null;
-  targetIds: AgentTargetId[];
-};
-
-type McpTargetRemoveDialogState = {
-  open: boolean;
-  loading: boolean;
-  error: string | null;
-  serverName: string;
-  targetId: AgentTargetId | null;
+  pathIds: string[];
 };
 
 const DEFAULT_MCP_SYNC_CONFIRM_DIALOG: McpSyncConfirmDialogState = {
@@ -52,11 +34,14 @@ const DEFAULT_MCP_SYNC_CONFIRM_DIALOG: McpSyncConfirmDialogState = {
   originalName: "",
   nextName: "",
   payload: null,
-  targetIds: [],
+  pathIds: [],
 };
 
+// MCP 服务的登记面（创建/编辑/删除）。分发统一走 useMcpSync 的矩阵同步；
+// 改名时已装路径的重写由后端在锁内一次完成（决策记录
+// 2026-11-28-mcp-matrix-sync.md 第 5 条），前端只弹确认。
 export function useMcpMutations(workspace: WorkspaceStateContext) {
-  const { inspection, reloadWorkspaceState } = workspace;
+  const { inspection } = workspace;
   const { runWorkspaceAction } = useWorkspaceAction(workspace);
 
   const mcpCreateDialog = reactive<{
@@ -76,77 +61,19 @@ export function useMcpMutations(workspace: WorkspaceStateContext) {
     serverNames: [],
   });
 
-  const mcpApplyPreviewDialog = reactive<McpApplyPreviewDialogState>({
-    ...DEFAULT_MCP_APPLY_PREVIEW_DIALOG,
-  });
-
   const mcpSyncConfirmDialog = reactive<McpSyncConfirmDialogState>({
     ...DEFAULT_MCP_SYNC_CONFIRM_DIALOG,
   });
 
-  const mcpTargetRemoveDialog = reactive<McpTargetRemoveDialogState>({
-    open: false,
-    loading: false,
-    error: null,
-    serverName: "",
-    targetId: null,
-  });
-
-  // 卡片上的「同步到目标」：把当前已落库的配置重新写入该 mcp 已安装的
-  // 每个 target，确认弹窗先列出目标，完成后结果留在卡片上。
-  const mcpCardSyncDialog = reactive<{
-    open: boolean;
-    loading: boolean;
-    error: string | null;
-    serverName: string;
-    payload: McpFormPayload | null;
-    targetIds: AgentTargetId[];
-  }>({
-    open: false,
-    loading: false,
-    error: null,
-    serverName: "",
-    payload: null,
-    targetIds: [],
-  });
-  // 结果按 mcp 名索引：卡片在弹窗关闭后仍要看到上一次同步写到了哪个目标。
-  const mcpCardSyncNotice = ref<{ serverName: string; text: string; failed: boolean } | null>(null);
-
-  function getInstalledMcpTargetIds(serverName: string): AgentTargetId[] {
+  function getInstalledMcpPathIds(serverName: string): string[] {
     return Array.from(
       new Set(
         (inspection.value?.mcps ?? [])
           .find((mcp) => mcp.name === serverName)
-          ?.targets?.filter((target) => target.state === McpTargetState.TargetStatePresent)
-          .map((target) => target.targetId) ?? [],
+          ?.paths?.filter((path) => path.state === McpPathState.PathStatePresent)
+          .map((path) => path.pathId) ?? [],
       ),
     );
-  }
-
-  // Serial-apply each target id: concurrent writes would clobber each other's
-  // config file mutations. Keep the loop `for await` — do not Promise.all it.
-  async function persistWorkspaceMcp(
-    payload: McpFormPayload,
-    currentServerName: string | null,
-    syncTargetIds: AgentTargetId[],
-  ) {
-    if (currentServerName) {
-      await updateWorkspaceMcp(currentServerName, payload);
-    } else {
-      await createWorkspaceMcp(payload);
-    }
-
-    if (!currentServerName || syncTargetIds.length === 0) {
-      return;
-    }
-
-    for (const targetId of syncTargetIds) {
-      await applyMcpToTarget(payload.name, targetId);
-
-      if (currentServerName !== payload.name) {
-        await removeMcpFromTarget(currentServerName, targetId);
-      }
-    }
   }
 
   function openMcpCreateDialog() {
@@ -195,17 +122,17 @@ export function useMcpMutations(workspace: WorkspaceStateContext) {
 
     if (form.originalName) {
       // 「重命名并同步」只在名字真的变了才有意义：只是改连接参数时名字没变，
-      // 弹一个重命名确认会误导用户，直接保存即可。
+      // 弹一个重命名确认会误导用户，直接保存即可（内容变更由同步弹窗刷新）。
       const isRename = payload.name !== form.originalName;
-      const targetIds = isRename ? getInstalledMcpTargetIds(form.originalName) : [];
-      if (targetIds.length) {
+      const pathIds = isRename ? getInstalledMcpPathIds(form.originalName) : [];
+      if (pathIds.length) {
         mcpSyncConfirmDialog.open = true;
         mcpSyncConfirmDialog.loading = false;
         mcpSyncConfirmDialog.error = null;
         mcpSyncConfirmDialog.originalName = form.originalName;
         mcpSyncConfirmDialog.nextName = payload.name;
         mcpSyncConfirmDialog.payload = payload;
-        mcpSyncConfirmDialog.targetIds = targetIds;
+        mcpSyncConfirmDialog.pathIds = pathIds;
         return;
       }
     }
@@ -213,7 +140,10 @@ export function useMcpMutations(workspace: WorkspaceStateContext) {
     const isEdit = form.originalName !== null;
     mcpCreateDialog.loading = true;
     await runWorkspaceAction({
-      action: () => persistWorkspaceMcp(payload, form.originalName, []),
+      action: () =>
+        form.originalName
+          ? updateWorkspaceMcp(form.originalName, payload)
+          : createWorkspaceMcp(payload),
       reload: true,
       error: isEdit ? "更新 mcp 失败。" : "添加 mcp 失败。",
       onSuccess: () => closeMcpCreateDialog(),
@@ -224,84 +154,17 @@ export function useMcpMutations(workspace: WorkspaceStateContext) {
     mcpCreateDialog.loading = false;
   }
 
-  // 卡片上的同步入口：只对已安装到 target 的 mcp 有意义，先弹确认窗列出目标。
-  function openMcpCardSyncDialog(mcp: McpConfigView) {
-    const targetIds = getInstalledMcpTargetIds(mcp.name);
-    if (targetIds.length === 0) return;
-
-    mcpCardSyncDialog.open = true;
-    mcpCardSyncDialog.loading = false;
-    mcpCardSyncDialog.error = null;
-    mcpCardSyncDialog.serverName = mcp.name;
-    // bindings 的 map 值渲染成 `?: string`（Go map[string]string 的通用形态），
-    // wire 上不会真的缺值；home page 可选字段收口成 null。
-    mcpCardSyncDialog.payload = {
-      name: mcp.name,
-      transport: mcp.transport,
-      homepage: mcp.homepage ?? null,
-      command: mcp.command,
-      args: mcp.args ?? [],
-      env: (mcp.env ?? {}) as Record<string, string>,
-      url: mcp.url,
-      headers: (mcp.headers ?? {}) as Record<string, string>,
-      timeout: mcp.timeout,
-    };
-    mcpCardSyncDialog.targetIds = targetIds;
-  }
-
-  function closeMcpCardSyncDialog() {
-    mcpCardSyncDialog.open = false;
-    mcpCardSyncDialog.loading = false;
-    mcpCardSyncDialog.error = null;
-    mcpCardSyncDialog.serverName = "";
-    mcpCardSyncDialog.payload = null;
-    mcpCardSyncDialog.targetIds = [];
-  }
-
-  async function confirmMcpCardSync() {
-    const { serverName, targetIds } = mcpCardSyncDialog;
-    if (!serverName || targetIds.length === 0) return;
-
-    // 逐个写入：并发改同一份配置文件会互相覆盖，失败目标不中断其余写入。
-    mcpCardSyncDialog.loading = true;
-    const failed: AgentTargetId[] = [];
-    try {
-      for (const targetId of targetIds) {
-        try {
-          await applyMcpToTarget(serverName, targetId);
-        } catch {
-          failed.push(targetId);
-        }
-      }
-    } finally {
-      mcpCardSyncDialog.loading = false;
-    }
-
-    await reloadWorkspaceState({ background: true });
-    mcpCardSyncNotice.value = failed.length
-      ? {
-          serverName,
-          text: `同步失败：${failed.map((id) => formatTargetLabel(id)).join("、")}`,
-          failed: true,
-        }
-      : {
-          serverName,
-          text: `已同步到 ${targetIds.length} 个目标。`,
-          failed: false,
-        };
-    closeMcpCardSyncDialog();
-  }
-
+  // 改名确认：登记更新与已装路径重写是后端一条命令，这里不再逐路径串行调。
   async function handleConfirmSyncMcpConfig() {
-    const { originalName, payload, targetIds } = mcpSyncConfirmDialog;
+    const { originalName, payload } = mcpSyncConfirmDialog;
     if (!originalName || !payload) return;
 
     mcpSyncConfirmDialog.loading = true;
     mcpCreateDialog.loading = true;
     await runWorkspaceAction({
-      action: () => persistWorkspaceMcp(payload, originalName, targetIds),
+      action: () => updateWorkspaceMcp(originalName, payload),
       reload: true,
-      error: "更新 mcp 并同步应用配置失败。",
+      error: "更新 mcp 并同步已安装路径失败。",
       onSuccess: () => {
         closeMcpSyncConfirmDialog();
         closeMcpCreateDialog();
@@ -348,128 +211,19 @@ export function useMcpMutations(workspace: WorkspaceStateContext) {
     mcpDeleteDialog.loading = false;
   }
 
-  function openMcpTargetRemoveDialog(serverName: string, targetId: AgentTargetId) {
-    mcpTargetRemoveDialog.open = true;
-    mcpTargetRemoveDialog.loading = false;
-    mcpTargetRemoveDialog.error = null;
-    mcpTargetRemoveDialog.serverName = serverName;
-    mcpTargetRemoveDialog.targetId = targetId;
-  }
-
-  function closeMcpTargetRemoveDialog() {
-    mcpTargetRemoveDialog.open = false;
-    mcpTargetRemoveDialog.loading = false;
-    mcpTargetRemoveDialog.error = null;
-    mcpTargetRemoveDialog.serverName = "";
-    mcpTargetRemoveDialog.targetId = null;
-  }
-
-  async function confirmMcpTargetRemove() {
-    const { serverName, targetId } = mcpTargetRemoveDialog;
-    if (!serverName || !targetId) return;
-
-    const targetLabel = formatTargetLabel(targetId);
-    mcpTargetRemoveDialog.loading = true;
-    await runWorkspaceAction({
-      action: () => removeMcpFromTarget(serverName, targetId),
-      reload: true,
-      error: `移除 ${serverName} 从 ${targetLabel} 失败。`,
-      onSuccess: () => closeMcpTargetRemoveDialog(),
-      onError: (message) => {
-        mcpTargetRemoveDialog.error = message;
-      },
-    });
-    mcpTargetRemoveDialog.loading = false;
-  }
-
-  function handleToggleMcpTarget(serverName: string, targetId: AgentTargetId) {
-    const targetItem =
-      (inspection.value?.mcps ?? [])
-        .find((mcp) => mcp.name === serverName)
-        ?.targets?.find((item) => item.targetId === targetId) ?? null;
-
-    if (targetItem?.state === McpTargetState.TargetStatePresent) {
-      openMcpTargetRemoveDialog(serverName, targetId);
-      return;
-    }
-
-    const targetLabel = formatTargetLabel(targetId);
-    mcpApplyPreviewDialog.loading = true;
-    // Preview-only fetch: no reload afterwards, the dialog opens with the
-    // result; failures stay on the button that started it.
-    void runWorkspaceAction({
-      action: () => previewMcpTarget(serverName, targetId),
-      error: `读取 ${serverName} 写入 ${targetLabel} 的预览失败。`,
-      onSuccess: (preview) => {
-        mcpApplyPreviewDialog.open = true;
-        mcpApplyPreviewDialog.loading = false;
-        mcpApplyPreviewDialog.submitting = false;
-        mcpApplyPreviewDialog.error = null;
-        mcpApplyPreviewDialog.serverName = serverName;
-        mcpApplyPreviewDialog.targetId = targetId;
-        mcpApplyPreviewDialog.preview = preview;
-      },
-      onError: (message) => {
-        mcpApplyPreviewDialog.loading = false;
-        mcpApplyPreviewDialog.error = message;
-        mcpApplyPreviewDialog.serverName = serverName;
-        mcpApplyPreviewDialog.targetId = targetId;
-        mcpApplyPreviewDialog.preview = null;
-        mcpApplyPreviewDialog.open = true;
-      },
-    });
-  }
-
-  function closeMcpApplyPreviewDialog() {
-    Object.assign(mcpApplyPreviewDialog, DEFAULT_MCP_APPLY_PREVIEW_DIALOG);
-  }
-
-  async function handleConfirmApplyMcpPreview() {
-    const { serverName, targetId } = mcpApplyPreviewDialog;
-    if (!serverName || !targetId) return;
-
-    const targetLabel = formatTargetLabel(targetId);
-    mcpApplyPreviewDialog.loading = true;
-    mcpApplyPreviewDialog.submitting = true;
-    await runWorkspaceAction({
-      action: () => applyMcpToTarget(serverName, targetId),
-      reload: true,
-      error: `添加 ${serverName} 到 ${targetLabel} 失败。`,
-      onSuccess: () => closeMcpApplyPreviewDialog(),
-      onError: (message) => {
-        mcpApplyPreviewDialog.error = message;
-      },
-    });
-    mcpApplyPreviewDialog.loading = false;
-    mcpApplyPreviewDialog.submitting = false;
-  }
-
   return {
     mcpCreateDialog,
     mcpDeleteDialog,
-    mcpApplyPreviewDialog,
     mcpSyncConfirmDialog,
-    mcpTargetRemoveDialog,
     openMcpCreateDialog,
     openMcpEditDialog,
     closeMcpCreateDialog,
     closeMcpSyncConfirmDialog,
     clearMcpFormError,
-    mcpCardSyncDialog,
-    mcpCardSyncNotice,
-    openMcpCardSyncDialog,
-    closeMcpCardSyncDialog,
-    confirmMcpCardSync,
     handleCreateWorkspaceMcp,
     handleConfirmSyncMcpConfig,
     openMcpDeleteDialog,
     closeMcpDeleteDialog,
     handleConfirmDeleteMcp,
-    openMcpTargetRemoveDialog,
-    closeMcpTargetRemoveDialog,
-    confirmMcpTargetRemove,
-    handleToggleMcpTarget,
-    closeMcpApplyPreviewDialog,
-    handleConfirmApplyMcpPreview,
   };
 }

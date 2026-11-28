@@ -415,6 +415,30 @@
   justify-content: flex-start;
 }
 
+/* 弹窗里的预设按钮区：条目随工具清单增长，必须换行而不是横向溢出截断 */
+.manager-import-dialog .manager-card-actions--start {
+  flex-wrap: wrap;
+}
+
+/* 格式写入示例：stdio 与远端两段并排（每列最小宽 240px，窄弹窗自动折成上下） */
+.manager-format-examples {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+
+.manager-format-examples__item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.manager-format-examples__item .manager-pre {
+  margin: 0;
+}
+
 /* 名称 + 时间戳的组合行：导入确认弹窗、批量导入结果列表仍在使用 */
 .manager-skill-headline__meta {
   display: flex;
@@ -511,36 +535,9 @@
   font-weight: var(--button-font-weight);
 }
 
-.manager-target-buttons {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-/* 标签 + 按钮行的分组：标签固定宽度，两行的按钮左边缘因此对齐。
-   不要叫 manager-target-group —— 那是 Targets 面板的分组容器类。 */
-.manager-target-buttons-group {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-}
-
-.manager-target-buttons-group__label {
-  flex: 0 0 auto;
-  min-width: 30px;
-  /* 与按钮同高，换行时标签仍与第一行对齐 */
-  line-height: 26px;
-  color: var(--color-muted);
-  font-size: var(--font-size-xs);
-  font-weight: 600;
-  letter-spacing: 0.04em;
-}
-
-.manager-target-buttons-group .manager-target-buttons {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
+/* 格式选择用的紧凑按钮（McpPathCreateDialog 的 configType 选择）；
+   装卸按钮已随矩阵同步删除（决策记录 2026-11-28-mcp-matrix-sync.md 第 4 条），
+   is-installed/is-warning/is-linked 状态变体随之移除 */
 .manager-target-button {
   min-height: var(--button-height-compact);
   padding: 0 10px;
@@ -549,8 +546,7 @@
   font-weight: var(--button-font-weight);
 }
 
-/* 悬停只加深底色：底色由 is-installed / is-warning / is-partial 等状态类
-   决定，这里覆盖会在 hover 时抹掉状态色 */
+/* 悬停只加深底色：底色由状态类决定，这里覆盖会在 hover 时抹掉状态色 */
 @media (hover: hover) {
   .manager-target-button:hover:not(:disabled) {
     border-color: var(--color-muted-soft);
@@ -559,29 +555,8 @@
   }
 }
 
-/* 已安装用圆点标记：扫视一列按钮时比底色更快识别 */
-.manager-target-button.is-installed::before {
-  content: "";
-  flex: 0 0 auto;
-  width: 6px;
-  height: 6px;
-  margin-right: 5px;
-  border-radius: 50%;
-  background: currentColor;
-}
-
 .manager-target-button.is-active {
   font-weight: 500;
-}
-
-.manager-target-button.is-warning {
-  border-color: var(--color-warning-line);
-  background: var(--color-warning-tint);
-  color: var(--color-warning-ink);
-}
-
-.manager-target-button.is-linked {
-  cursor: default;
 }
 
 .manager-delete-confirm-list {
@@ -1203,6 +1178,44 @@
   margin-top: 8px;
 }
 
+/* --- 双列布局：左列 = 已有内容（技能源 / MCP 服务），右列 = 路径条目。
+   两列各自独立滚动；容器用 grid 而不是嵌套 flex，列宽互不挤压。 --- */
+
+.manager-split {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: 14px;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.manager-split__col {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+}
+
+.manager-split__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 4px;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--color-muted);
+}
+
+/* 窄屏退化为单列：右列（路径）在上，先看到分发落点再回头管来源。 */
+@media (max-width: 900px) {
+  .manager-split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .manager-split__col--secondary {
+    order: -1;
+  }
+}
+
 /* --- Targets tab: flat list --- */
 
 .manager-target-list {
@@ -1356,6 +1369,15 @@
 
 .manager-target-row__actions .secondary-button,
 .manager-target-row__actions .danger-button {
+  min-height: var(--button-height-compact);
+  padding: 0 10px;
+  font-size: var(--font-size-sm);
+}
+
+/* MCP 服务卡片的修改/删除与本域路径行卡片（上方紧凑档）同尺寸：McpCard 是
+   AppCard actions 槽在本域的唯一使用点，行内小动作用 28 档，不用页面级 36 档 */
+.app-card__actions .secondary-button,
+.app-card__actions .danger-button {
   min-height: var(--button-height-compact);
   padding: 0 10px;
   font-size: var(--font-size-sm);
@@ -1692,4 +1714,184 @@
   .manager-sync-columns {
     grid-template-columns: 1fr;
   }
+}
+
+/* ==========================================================================
+   MCP 矩阵同步：格子矩阵（行 = server、列 = MCP 路径）、卡片状态 pill、
+   聚合预演确认清单（决策记录 2026-11-28-mcp-matrix-sync.md）。
+   ========================================================================== */
+
+/* 收敛语义的一句话提示 */
+.manager-sync-dialog__hint {
+  margin: 0;
+  color: var(--color-muted);
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+}
+
+.manager-mcp-sync__scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-control);
+}
+
+.manager-mcp-sync-table {
+  width: 100%;
+  /* separate 而不是 collapse：列分隔竖线需要逐格绘制，collapse 与 sticky
+     表头在分数 DPI（Windows 125%/150%）下的合成会沿列边界析出接缝伪影 */
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: var(--font-size-sm);
+}
+
+.manager-mcp-sync-table th,
+.manager-mcp-sync-table td {
+  border-bottom: 1px solid var(--color-hairline-soft);
+}
+
+/* 列分隔竖线：与行分隔线同权重，从表头贯通到数据行（separate 边框模型下
+   逐格绘制，sticky 表头滚动时竖线不断开） */
+.manager-mcp-sync-table th:not(:first-child),
+.manager-mcp-sync-table td:not(:first-child) {
+  border-left: 1px solid var(--color-hairline-soft);
+}
+
+.manager-mcp-sync-table tbody tr:last-child th,
+.manager-mcp-sync-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.manager-mcp-sync-table__corner,
+.manager-mcp-sync-table__col,
+.manager-mcp-sync-table__row {
+  padding: 8px 10px;
+  text-align: left;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.manager-mcp-sync-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--color-canvas);
+}
+
+.manager-mcp-sync-table__check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.manager-mcp-sync-table__check--center {
+  justify-content: center;
+  cursor: pointer;
+}
+
+.manager-mcp-sync-table__cell {
+  padding: 4px 10px;
+  text-align: center;
+}
+
+/* 格子按巡检状态轻着色：扫视矩阵时已装/异常一眼可辨 */
+.manager-mcp-sync-table__cell.is-present {
+  background: var(--color-success-tint);
+}
+
+.manager-mcp-sync-table__cell.is-error {
+  background: var(--color-warning-tint);
+}
+
+.manager-mcp-sync-table__blocked {
+  color: var(--color-muted-soft);
+}
+
+.manager-mcp-sync__count {
+  margin: 0;
+  color: var(--color-muted);
+  font-size: var(--font-size-xs);
+}
+
+/* 卡片状态 pill：不可点，只表意 */
+.manager-mcp-states {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.manager-mcp-states__label {
+  color: var(--color-muted);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.manager-mcp-state-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-pill);
+  color: var(--color-muted);
+  font-size: var(--font-size-xs);
+  cursor: default;
+}
+
+.manager-mcp-state-pill.is-present {
+  border-color: var(--color-success-line);
+  background: var(--color-success-tint);
+  color: var(--color-success);
+}
+
+.manager-mcp-state-pill.is-error {
+  border-color: var(--color-warning-line);
+  background: var(--color-warning-tint);
+  color: var(--color-warning-ink);
+}
+
+/* 聚合预演确认清单：将写入（可展开条目内容）与将移除分组列出 */
+.manager-mcp-sync-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.manager-mcp-sync-preview__group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.manager-mcp-sync-preview__title {
+  margin: 0;
+  color: var(--color-ink);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+
+.manager-mcp-sync-preview__row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.manager-mcp-sync-preview__pair {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+}
+
+.manager-mcp-sync-preview__details summary {
+  cursor: pointer;
+  color: var(--color-muted);
+  font-size: var(--font-size-xs);
+}
+
+.manager-mcp-sync-preview__error {
+  color: var(--color-danger);
+  font-size: var(--font-size-xs);
 }

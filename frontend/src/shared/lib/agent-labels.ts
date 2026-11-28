@@ -1,7 +1,7 @@
 // 自动生成：go test ./internal/agents 触发。
 // 来源：internal/agents 的 AgentSpecs 清单（工具静态清单单一来源）；请勿手改。
 
-// agent 的产品名集中维护：会话来源、workspace target、providers 的界面文案
+// agent 的产品名集中维护：会话来源、workspace 预设、providers 的界面文案
 // 都从这里取，避免同一个工具在不同界面出现 codex / Codex / claude 等不同写法。
 export const AGENT_LABELS: Record<string, string> = {
   codex: "Codex",
@@ -11,10 +11,11 @@ export const AGENT_LABELS: Record<string, string> = {
   grokbuild: "Grok Build",
   pi: "Pi",
   dsh: "DeepSeek Harness",
+  hermes: "HermesAgent",
 };
 
-// 可配置的 agent 清单与顺序（与后端 AgentSpecs 清单一致）：项目成员的候选、目标
-// 选择器等都从这里取，不再前端另维护一份拷贝。
+// 可配置的 agent 清单与顺序（与后端 AgentSpecs 清单一致）：workspace 预设、
+// 关于页工具名单等都从这里取，不再前端另维护一份拷贝。
 export const AGENT_IDS = [
   "codex",
   "claude",
@@ -23,6 +24,7 @@ export const AGENT_IDS = [
   "grokbuild",
   "pi",
   "dsh",
+  "hermes",
 ] as const;
 
 // 跨域 id 映射（wire id → 规范键）：session 来源等 wire 写法与规范键不同时

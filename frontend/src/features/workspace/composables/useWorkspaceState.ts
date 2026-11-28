@@ -17,26 +17,12 @@ export function useWorkspaceState() {
   const runningAction = ref(false);
   // 整页读取失败：错误态由面板就地渲染并提供重试。
   const loadError = ref<string | null>(null);
-  // 项目 agent 选择器的部分失败目标：错误必须留在触发它的 mcp 卡片上，
-  // 因为弹窗关闭后失败目标已不在任何弹窗里。
-  const projectPickerWarnings = ref<Record<string, string>>({});
-
   function setConfigDocument(document: WorkspaceConfigDocument | null) {
     configDocument.value = document;
   }
 
   function setInspection(nextInspection: WorkspaceInspection | null) {
     inspection.value = nextInspection;
-  }
-
-  function setProjectPickerWarning(serverName: string, message: string | null) {
-    const next = { ...projectPickerWarnings.value };
-    if (message === null) {
-      delete next[serverName];
-    } else {
-      next[serverName] = message;
-    }
-    projectPickerWarnings.value = next;
   }
 
   // NOTE: bootstrap is intentionally NOT wired to onMounted here. Workspace.vue
@@ -88,9 +74,7 @@ export function useWorkspaceState() {
     loadingInspection,
     runningAction,
     loadError,
-    projectPickerWarnings,
     setInspection,
-    setProjectPickerWarning,
     applyWorkspaceState,
     reloadWorkspaceState,
     retryWorkspaceState,

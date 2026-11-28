@@ -1,125 +1,120 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import AppTooltip from "@shared/ui/AppTooltip.vue";
-import type { SkillLinkAssociation, SyncTargetOption } from "../types";
+import type { SkillLinkAssociation, SyncPathOption } from "../types";
 import {
   canRemoveSkillLink,
   pendingSkillLinkCleanupCount,
   hasCurrentSourceSkillLinks,
   hasUnmanagedSkillLinks,
-  isSelectableSyncTarget,
+  selectableSyncPathIds,
   skillDirIsAlias,
   skillLinkSourceLabel,
   skillLinkSourcePath,
   skillLinkStateInfo,
 } from "../syncAssociations";
-import { groupSyncTargets } from "../syncTargetGroups";
 
-type SyncTargetGroupsProps = {
+type SyncPathGroupsProps = {
   busy: boolean;
   currentSourceId?: string;
   sourceLabels?: Record<string, string>;
-  selectedTargetIds: Set<string>;
-  targets: SyncTargetOption[];
+  selectedPathIds: Set<string>;
+  paths: SyncPathOption[];
 };
 
-const props = defineProps<SyncTargetGroupsProps>();
+const props = defineProps<SyncPathGroupsProps>();
 
 defineEmits<{
-  setTargets: [targetIds: string[], selected: boolean];
-  toggleTarget: [id: string];
-  removeLink: [targetId: string, destinationPath: string];
+  setPaths: [pathIds: string[], selected: boolean];
+  togglePath: [name: string];
+  removeLink: [pathName: string, destinationPath: string];
 }>();
-
-function getSelectableTargetIds(targets: SyncTargetOption[]): string[] {
-  return targets.filter(isSelectableSyncTarget).map((t) => t.id);
-}
 
 function isCurrentSourceLink(link: SkillLinkAssociation): boolean {
   return Boolean(props.currentSourceId && (link.matchedSourceIds ?? []).includes(props.currentSourceId));
 }
 
-const groups = computed(() => groupSyncTargets(props.targets));
+const selectableIds = computed(() => selectableSyncPathIds(props.paths));
 </script>
 
 <template>
   <div class="manager-sync-target-groups">
-    <div v-for="group in groups" :key="group.id" class="manager-sync-target-group">
+    <div class="manager-sync-target-group">
       <div class="manager-sync-target-group__header">
-        <span>{{ group.label }}</span>
+        <span>技能路径</span>
         <span class="manager-sync-target-group__count">
-          {{ getSelectableTargetIds(group.targets).filter((id) => selectedTargetIds.has(id)).length }}/{{ getSelectableTargetIds(group.targets).length }}
+          {{ selectableIds.filter((id) => selectedPathIds.has(id)).length }}/{{ selectableIds.length }}
         </span>
         <div class="manager-sync-target-group__actions">
           <button
             class="secondary-button manager-sync-target-group__action"
-            :disabled="busy || getSelectableTargetIds(group.targets).length === 0 || getSelectableTargetIds(group.targets).every((id) => selectedTargetIds.has(id))"
+            :disabled="busy || selectableIds.length === 0 || selectableIds.every((id) => selectedPathIds.has(id))"
             type="button"
-            @click="$emit('setTargets', getSelectableTargetIds(group.targets), true)"
+            @click="$emit('setPaths', selectableIds, true)"
           >
             全选
           </button>
           <button
             class="secondary-button manager-sync-target-group__action"
-            :disabled="busy || getSelectableTargetIds(group.targets).every((id) => !selectedTargetIds.has(id))"
+            :disabled="busy || selectableIds.every((id) => !selectedPathIds.has(id))"
             type="button"
-            @click="$emit('setTargets', getSelectableTargetIds(group.targets), false)"
+            @click="$emit('setPaths', selectableIds, false)"
           >
             取消
           </button>
         </div>
       </div>
       <div
-        v-for="target in group.targets"
-        :key="target.id"
+        v-for="path in paths"
+        :key="path.name"
         class="manager-sync-target-entry"
       >
         <label
-          :class="`manager-sync-target-row${busy || skillDirIsAlias(target) ? ' manager-sync-target-row--disabled' : ''}`"
+          :class="`manager-sync-target-row${busy || skillDirIsAlias(path) ? ' manager-sync-target-row--disabled' : ''}`"
         >
           <input
             type="checkbox"
-            :checked="selectedTargetIds.has(target.id)"
-            :disabled="busy || skillDirIsAlias(target)"
-            @change="$emit('toggleTarget', target.id)"
+            :checked="selectedPathIds.has(path.name)"
+            :disabled="busy || skillDirIsAlias(path)"
+            @change="$emit('togglePath', path.name)"
           />
           <span class="manager-sync-target-row__body">
             <span class="manager-sync-target-row__label-line">
-              <span class="manager-sync-target-row__label">{{ target.label }}</span>
+              <span class="manager-sync-target-row__label">{{ path.name }}</span>
               <span class="manager-sync-target-row__tags">
                 <span
-                  v-if="hasUnmanagedSkillLinks(target.links ?? [])"
+                  v-if="hasUnmanagedSkillLinks(path.links ?? [])"
                   class="manager-sync-target-row__tag manager-sync-target-row__tag--unmanaged"
                 >
                   非受管控
                 </span>
                 <span
-                  v-if="hasCurrentSourceSkillLinks(target.links ?? [], currentSourceId)"
+                  v-if="hasCurrentSourceSkillLinks(path.links ?? [], currentSourceId)"
                   class="manager-sync-target-row__tag manager-sync-target-row__tag--linked"
                 >
                   关联
                 </span>
               </span>
             </span>
-            <span class="manager-sync-target-row__path">{{ target.skillDir }}</span>
-            <!-- 落点是软链接时，链接指向的原始目的地：这一行本身就说明它挂在
+            <span class="manager-sync-target-row__path">{{ path.dir }}</span>
+            <!-- 目录是软链接时，链接指向的原始目的地：这一行本身就说明它挂在
                  哪儿，不再另起一行写属主名字。 -->
-            <span v-if="target.skillDirLinkTarget" class="manager-sync-target-row__alias">
-              {{ target.skillDirLinkTarget }}
+            <span v-if="path.dirLinkTarget" class="manager-sync-target-row__alias">
+              {{ path.dirLinkTarget }}
             </span>
           </span>
         </label>
 
-        <details v-if="(target.links ?? []).length > 0" class="manager-sync-target-links">
+        <details v-if="(path.links ?? []).length > 0" class="manager-sync-target-links">
           <summary>
-            已关联 {{ (target.links ?? []).length }} 项
-            <span v-if="pendingSkillLinkCleanupCount(target.links ?? []) > 0" class="manager-sync-target-links__cleanup">
-              待清理 {{ pendingSkillLinkCleanupCount(target.links ?? []) }} 项
+            已关联 {{ (path.links ?? []).length }} 项
+            <span v-if="pendingSkillLinkCleanupCount(path.links ?? []) > 0" class="manager-sync-target-links__cleanup">
+              待清理 {{ pendingSkillLinkCleanupCount(path.links ?? []) }} 项
             </span>
           </summary>
           <div class="manager-sync-target-links__list">
             <div
-              v-for="link in target.links"
+              v-for="link in path.links"
               :key="link.destinationPath"
               :class="[
                 'manager-sync-target-link',
@@ -152,7 +147,7 @@ const groups = computed(() => groupSyncTargets(props.targets));
                 :disabled="busy"
                 class="manager-sync-target-link__remove"
                 type="button"
-                @click="$emit('removeLink', target.id, link.destinationPath)"
+                @click="$emit('removeLink', path.name, link.destinationPath)"
               >
                 <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24">
                   <path

@@ -13,6 +13,7 @@ describe("agent-labels (generated)", () => {
       grokbuild: "Grok Build",
       pi: "Pi",
       dsh: "DeepSeek Harness",
+      hermes: "HermesAgent",
     });
   });
 

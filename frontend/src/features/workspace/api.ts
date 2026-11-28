@@ -1,36 +1,34 @@
 import { bindingsCall } from "@shared/lib/bindings";
 import { WorkspaceService } from "@bindings/reins/internal/workspace";
 import type {
-  AgentTargetId,
-  TargetPreset,
-  WorkspaceState,
   McpTransport,
-  McpTargetPreviewResult,
-  McpTargetMutationResult,
   BatchGitSkillImportResult,
   SkillBatchImportFile,
   SkillDiscoveryResult,
   WorkspaceSelection,
   WorkspaceMcpMutationResult,
-  WorkspaceTargetMutationResult,
-  SyncTargetOption,
+  WorkspacePathMutationResult,
+  SyncPathOption,
   SyncSkillOptionsResult,
   SkillSyncItem,
   SourceSyncInput,
   SourceSyncConflict,
   SourceSyncResult,
   SkillSourceRefreshResult,
+  SkillPathCleanupPreview,
+  McpPathCleanupPreview,
+  McpSyncInput,
+  McpSyncPreview,
+  McpSyncResult,
+  SkillPathPreset,
+  McpPathPreset,
+  McpFormatInfo,
+  WorkspaceState,
 } from "./types";
 
 // 后端调用经 bindings service；类型与运行时同源（frontend/bindings/），
 // Promise 收口断言见 @shared/lib/bindings。参数是 bindings 的逐位置参数：
-// target/MCP 的创建传散参，struct 入参直接满足 bindings 接口。
-
-type WorkspaceTargetPayload = {
-  targetId: string;
-  skillDir: string;
-  configPath?: string | null;
-};
+// 路径条目/MCP server 的创建传散参，struct 入参直接满足 bindings 接口。
 
 type WorkspaceMcpPayload = {
   name: string;
@@ -66,18 +64,20 @@ function buildWorkspaceMcpPayload(payload: WorkspaceMcpPayload) {
   };
 }
 
-export function getTargetPresets(): Promise<TargetPreset[]> {
-  return bindingsCall(WorkspaceService.GetTargetPresets());
+export function getSkillPathPresets(): Promise<SkillPathPreset[]> {
+  return bindingsCall(WorkspaceService.GetSkillPathPresets());
+}
+
+export function getMcpPathPresets(): Promise<McpPathPreset[]> {
+  return bindingsCall(WorkspaceService.GetMcpPathPresets());
+}
+
+export function getMcpFormatInfos(): Promise<McpFormatInfo[]> {
+  return bindingsCall(WorkspaceService.GetMcpFormatInfos());
 }
 
 export function getWorkspaceState(): Promise<WorkspaceState> {
   return bindingsCall(WorkspaceService.GetWorkspaceState());
-}
-
-export function selectProjectPath(
-  projectPath?: string
-): Promise<WorkspaceSelection | null> {
-  return bindingsCall(WorkspaceService.SelectProjectPath(projectPath ?? null));
 }
 
 export function selectLocalSkillSourceDirectory(
@@ -88,19 +88,19 @@ export function selectLocalSkillSourceDirectory(
   );
 }
 
-export function selectTargetSkillDirectory(
+export function selectSkillPathDirectory(
   currentPath?: string
 ): Promise<WorkspaceSelection | null> {
   return bindingsCall(
-    WorkspaceService.SelectTargetSkillDirectory(currentPath ?? null)
+    WorkspaceService.SelectSkillPathDirectory(currentPath ?? null)
   );
 }
 
-export function selectTargetMcpConfigFile(
+export function selectMcpPathConfigFile(
   currentPath?: string
 ): Promise<WorkspaceSelection | null> {
   return bindingsCall(
-    WorkspaceService.SelectTargetMCPConfigFile(currentPath ?? null)
+    WorkspaceService.SelectMcpPathConfigFile(currentPath ?? null)
   );
 }
 
@@ -156,32 +156,63 @@ export function selectSkillBatchImportFile(): Promise<SkillBatchImportFile | nul
   return bindingsCall(WorkspaceService.SelectSkillBatchImportFile());
 }
 
-export function createWorkspaceTarget(
-  payload: WorkspaceTargetPayload
-): Promise<WorkspaceTargetMutationResult> {
-  return bindingsCall(WorkspaceService.CreateWorkspaceTarget(
-    payload.targetId,
-    payload.skillDir,
-    payload.configPath ?? null
-  ));
+export function createSkillPath(
+  name: string,
+  dir: string
+): Promise<WorkspacePathMutationResult> {
+  return bindingsCall(WorkspaceService.CreateSkillPath(name, dir));
 }
 
-export function updateWorkspaceTarget(
-  currentTargetId: string,
-  payload: WorkspaceTargetPayload
-): Promise<WorkspaceTargetMutationResult> {
-  return bindingsCall(WorkspaceService.UpdateWorkspaceTarget(
-    currentTargetId,
-    payload.targetId,
-    payload.skillDir,
-    payload.configPath ?? null
-  ));
+export function updateSkillPath(
+  currentName: string,
+  name: string,
+  dir: string
+): Promise<WorkspacePathMutationResult> {
+  return bindingsCall(WorkspaceService.UpdateSkillPath(currentName, name, dir));
 }
 
-export function deleteWorkspaceTarget(
-  targetId: string
-): Promise<WorkspaceTargetMutationResult> {
-  return bindingsCall(WorkspaceService.DeleteWorkspaceTarget(targetId));
+export function deleteSkillPath(
+  name: string,
+  cleanup: boolean
+): Promise<WorkspacePathMutationResult> {
+  return bindingsCall(WorkspaceService.DeleteSkillPath(name, cleanup));
+}
+
+export function previewSkillPathCleanup(
+  name: string
+): Promise<SkillPathCleanupPreview> {
+  return bindingsCall(WorkspaceService.PreviewSkillPathCleanup(name));
+}
+
+export function createMcpPath(
+  name: string,
+  configPath: string,
+  configType: string,
+  configPrefix: string
+): Promise<WorkspacePathMutationResult> {
+  return bindingsCall(WorkspaceService.CreateMcpPath(name, configPath, configType, configPrefix));
+}
+
+export function updateMcpPath(
+  currentName: string,
+  name: string,
+  configPath: string,
+  configPrefix: string
+): Promise<WorkspacePathMutationResult> {
+  return bindingsCall(WorkspaceService.UpdateMcpPath(currentName, name, configPath, configPrefix));
+}
+
+export function deleteMcpPath(
+  name: string,
+  cleanup: boolean
+): Promise<WorkspacePathMutationResult> {
+  return bindingsCall(WorkspaceService.DeleteMcpPath(name, cleanup));
+}
+
+export function previewMcpPathCleanup(
+  name: string
+): Promise<McpPathCleanupPreview> {
+  return bindingsCall(WorkspaceService.PreviewMcpPathCleanup(name));
 }
 
 export function createWorkspaceMcp(
@@ -241,55 +272,19 @@ export function cancelSkillSourceFetch(): Promise<void> {
   return bindingsCall(WorkspaceService.CancelSkillSourceFetch());
 }
 
-export function applyMcpToTarget(
-  serverName: string,
-  targetId: AgentTargetId
-): Promise<McpTargetMutationResult> {
-  return bindingsCall(WorkspaceService.ApplyMCPToTarget(serverName, targetId));
+// 逐路径 apply/remove/preview 已随矩阵同步删除（决策记录
+// 2026-11-28-mcp-matrix-sync.md 第 5 条）：分发动作统一走 previewMcpSync +
+// syncMcpsToPaths。
+export function previewMcpSync(
+  input: McpSyncInput
+): Promise<McpSyncPreview> {
+  return bindingsCall(WorkspaceService.PreviewMcpSync(input));
 }
 
-export function removeMcpFromTarget(
-  serverName: string,
-  targetId: AgentTargetId
-): Promise<McpTargetMutationResult> {
-  return bindingsCall(WorkspaceService.RemoveMCPFromTarget(serverName, targetId));
-}
-
-export function previewMcpTarget(
-  serverName: string,
-  targetId: AgentTargetId
-): Promise<McpTargetPreviewResult> {
-  return bindingsCall(WorkspaceService.PreviewMCPTarget(serverName, targetId));
-}
-
-export function createWorkspaceProject(
-  projectId: string,
-  path: string,
-  agents: string[]
-): Promise<WorkspaceTargetMutationResult> {
-  return bindingsCall(WorkspaceService.CreateWorkspaceProject({
-    projectId,
-    path,
-    agents,
-  }));
-}
-
-export function updateWorkspaceProject(
-  projectId: string,
-  path: string,
-  agents: string[]
-): Promise<WorkspaceTargetMutationResult> {
-  return bindingsCall(WorkspaceService.UpdateWorkspaceProject({
-    projectId,
-    path,
-    agents,
-  }));
-}
-
-export function deleteWorkspaceProject(
-  projectId: string
-): Promise<WorkspaceTargetMutationResult> {
-  return bindingsCall(WorkspaceService.DeleteWorkspaceProject(projectId));
+export function syncMcpsToPaths(
+  input: McpSyncInput
+): Promise<McpSyncResult> {
+  return bindingsCall(WorkspaceService.SyncMcpsToPaths(input));
 }
 
 export function deleteSkillSource(sourceId: string): Promise<WorkspaceState> {
@@ -300,18 +295,18 @@ export function deleteSkillSources(sourceIds: string[]): Promise<void> {
   return bindingsCall(WorkspaceService.DeleteSkillSources(sourceIds));
 }
 
-export function getSyncTargetOptions(): Promise<SyncTargetOption[]> {
-  return bindingsCall(WorkspaceService.GetSyncTargetOptions());
+export function getSyncPathOptions(): Promise<SyncPathOption[]> {
+  return bindingsCall(WorkspaceService.GetSyncPathOptions());
 }
 
 export function getSyncSkillOptions(sourceId: string): Promise<SyncSkillOptionsResult> {
   return bindingsCall(WorkspaceService.GetSyncSkillOptions(sourceId));
 }
 
-export function syncSourceToTargets(
+export function syncSourceToPaths(
   input: SourceSyncInput
 ): Promise<SourceSyncResult> {
-  return bindingsCall(WorkspaceService.SyncSourceToTargets(input));
+  return bindingsCall(WorkspaceService.SyncSourceToPaths(input));
 }
 
 export function previewSourceSyncConflicts(
@@ -322,14 +317,14 @@ export function previewSourceSyncConflicts(
 
 export function removeSourceSync(
   sourceId: string,
-  targetIds: string[]
+  pathNames: string[]
 ): Promise<SourceSyncResult> {
-  return bindingsCall(WorkspaceService.RemoveSourceSync(sourceId, targetIds));
+  return bindingsCall(WorkspaceService.RemoveSourceSync(sourceId, pathNames));
 }
 
-export function removeTargetSkillLink(
-  targetId: string,
+export function removeSkillPathLink(
+  pathName: string,
   destinationPath: string
 ): Promise<SkillSyncItem> {
-  return bindingsCall(WorkspaceService.RemoveTargetSkillLink(targetId, destinationPath));
+  return bindingsCall(WorkspaceService.RemoveSkillPathLink(pathName, destinationPath));
 }

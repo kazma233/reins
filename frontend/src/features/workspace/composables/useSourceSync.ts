@@ -1,5 +1,5 @@
 import { reactive, ref } from "vue";
-import { previewSourceSyncConflicts, syncSourceToTargets } from "../api";
+import { previewSourceSyncConflicts, syncSourceToPaths } from "../api";
 import type {
   SkillSourceConfigView,
   SourceSyncConflict,
@@ -18,7 +18,7 @@ type SourceSyncSnapshot = {
 type PendingSourceSync = {
   source: SkillSourceConfigView;
   skillPaths: string[];
-  targetIds: string[];
+  pathIds: string[];
   snapshot: SourceSyncSnapshot;
 };
 
@@ -64,7 +64,7 @@ export function useSourceSync(workspace: WorkspaceStateContext) {
     return {
       sourceId: pending.source.id,
       skillPaths: pending.skillPaths,
-      targetIds: pending.targetIds,
+      pathIds: pending.pathIds,
       overwriteExisting,
       sourceRoot: pending.snapshot.sourceRoot,
       skills: pending.snapshot.skills,
@@ -74,7 +74,7 @@ export function useSourceSync(workspace: WorkspaceStateContext) {
   // 同步结果只回写到弹窗按钮旁；面板列表由 reload 自行更新，
   // 不再额外往来源行上挂一份结果。
   async function runSourceSync(pending: PendingSourceSync, overwriteExisting: boolean) {
-    const result: SourceSyncResult = await syncSourceToTargets(
+    const result: SourceSyncResult = await syncSourceToPaths(
       buildSourceSyncInput(pending, overwriteExisting),
     );
     const warnings = result.warnings ?? [];
@@ -105,14 +105,14 @@ export function useSourceSync(workspace: WorkspaceStateContext) {
 
   async function handleConfirmSourceSync(
     skillPaths: string[],
-    targetIds: string[],
+    pathIds: string[],
     snapshot: SourceSyncSnapshot,
   ) {
     const source = sourceSyncDialog.source;
     if (!source) return;
 
     sourceSyncDialog.loading = true;
-    const pending: PendingSourceSync = { source, skillPaths, targetIds, snapshot };
+    const pending: PendingSourceSync = { source, skillPaths, pathIds, snapshot };
 
     try {
       const conflicts = await previewSourceSyncConflicts(buildSourceSyncInput(pending, false));

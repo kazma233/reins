@@ -1,19 +1,21 @@
 <script setup lang="ts">
 import { computed, toRefs } from "vue";
 import ConfirmDialog from "@shared/ui/ConfirmDialog.vue";
+import AppCard from "@shared/ui/AppCard.vue";
 import AppLoadError from "@shared/ui/AppLoadError.vue";
 import McpCard from "../McpCard.vue";
+import McpSyncDialog from "../dialogs/McpSyncDialog.vue";
 import McpCreateDialog from "../dialogs/McpCreateDialog.vue";
-import ProjectAgentPickerDialog from "../dialogs/ProjectAgentPickerDialog.vue";
+import McpPathCreateDialog from "../dialogs/McpPathCreateDialog.vue";
 import { useMcpMutations } from "../../composables/useMcpMutations";
-import { useProjectAgentPicker } from "../../composables/useProjectAgentPicker";
+import { useMcpPathMutations } from "../../composables/useMcpPathMutations";
+import { useMcpSync } from "../../composables/useMcpSync";
 import type { WorkspaceStateContext } from "../../composables/useWorkspaceState";
-import { formatTargetLabel, parseTargetId, groupTargetIds } from "../../model";
+import { McpSyncAction } from "../../types";
 import type {
-  AgentTargetId,
   McpInspection,
   WorkspaceConfigDocument,
-  WorkspaceInspection
+  WorkspaceInspection,
 } from "../../types";
 
 type McpPanelProps = {
@@ -26,17 +28,13 @@ type McpPanelProps = {
 
 const props = defineProps<McpPanelProps>();
 
-const { configDocument, inspection, runningAction, loadError } = toRefs(props);
+const { configDocument, inspection } = toRefs(props);
 const { retryWorkspaceState } = props.workspace;
 
 const {
   mcpCreateDialog,
   mcpDeleteDialog,
-  mcpApplyPreviewDialog,
   mcpSyncConfirmDialog,
-  mcpTargetRemoveDialog,
-  mcpCardSyncDialog,
-  mcpCardSyncNotice,
   openMcpCreateDialog,
   openMcpEditDialog,
   openMcpDeleteDialog,
@@ -47,129 +45,245 @@ const {
   handleConfirmSyncMcpConfig,
   closeMcpDeleteDialog,
   handleConfirmDeleteMcp,
-  closeMcpTargetRemoveDialog,
-  confirmMcpTargetRemove,
-  handleToggleMcpTarget,
-  closeMcpApplyPreviewDialog,
-  handleConfirmApplyMcpPreview,
-  openMcpCardSyncDialog,
-  closeMcpCardSyncDialog,
-  confirmMcpCardSync,
 } = useMcpMutations(props.workspace);
 
+// 矩阵同步的分发面：入口在页头按钮区，弹窗自管理勾选矩阵，聚合预演的
+// 确认清单叠在同步弹窗之上。
 const {
-  projectAgentPickerDialog,
-  projectEntriesWithAgents,
-  projectAgentsByProjectId,
-  pickerInstalledAgentIds,
-  pickerPendingDiff,
-  openProjectAgentPickerForMcp,
-  closeProjectAgentPickerDialog,
-  toggleProjectAgentPickerAgent,
-  openProjectAgentPickerConfirm,
-  closeProjectAgentPickerConfirm,
-  handleApplyProjectAgentPicker,
-} = useProjectAgentPicker(props.workspace);
+  mcpSyncDialog,
+  mcpSyncDialogRef,
+  mcpSyncPreviewDialog,
+  openMcpSync,
+  closeMcpSyncDialog,
+  handleConfirmMcpSync,
+  closeMcpSyncPreviewDialog,
+  confirmMcpSyncExecute,
+} = useMcpSync(props.workspace);
+
+const {
+  mcpPathDialog,
+  mcpPathDeleteDialog,
+  openMcpPathCreateDialog,
+  openMcpPathEditDialog,
+  closeMcpPathDialog,
+  clearMcpPathFormError,
+  loadMcpPathPresets,
+  loadMcpFormatInfos,
+  handleApplyMcpPathPreset,
+  handleSelectMcpPathConfigType,
+  handlePickMcpPathConfigFile,
+  handleSubmitMcpPath,
+  openMcpPathDeleteDialog,
+  closeMcpPathDeleteDialog,
+  handleConfirmDeleteMcpPath,
+} = useMcpPathMutations(props.workspace);
 
 const configMcps = computed(() => configDocument.value?.config?.mcps ?? []);
-const targetIds = computed(
-  () => (configDocument.value?.config?.targets ?? []).map((target) => target.id),
-);
+const configMcpPaths = computed(() => configDocument.value?.config?.mcpPaths ?? []);
 
 const inspectionMap = computed<Map<string, McpInspection>>(
   () => new Map((inspection.value?.mcps ?? []).map((mcp) => [mcp.name, mcp])),
 );
 
-// ProjectAgentPickerDialog requires non-null projectId; fall back to a safe
-// placeholder when the picker is closed so prop types stay valid.
-const pickerAgents = computed(() =>
-  projectAgentPickerDialog.projectId
-    ? (projectAgentsByProjectId.value.get(projectAgentPickerDialog.projectId) ?? [])
-    : [],
+// 聚合预演清单按动作分组：将写入（创建）在前，将移除在后。
+const confirmCreateItems = computed(() =>
+  mcpSyncPreviewDialog.items.filter((item) => item.action === McpSyncAction.McpSyncActionCreate),
 );
-const pickerProjectId = computed(() => projectAgentPickerDialog.projectId ?? "");
-
-// 确认弹窗里与按钮一致只显示 agent 名，省掉项目前缀。
-function pickerAgentLabel(targetId: AgentTargetId) {
-  return parseTargetId(targetId).agentId;
-}
-
-// 同步确认里的目标按项目分组：项目 target 各归自己的 project，
-// 全局 target 单独一组，与卡片上的分组口径一致。
-const syncDialogTargetGroups = computed(() => groupTargetIds(mcpCardSyncDialog.targetIds));
-const syncDialogGlobalTargets = computed(
-  () => syncDialogTargetGroups.value.find((group) => group.key === "global")?.targetIds ?? [],
+const confirmRemoveItems = computed(() =>
+  mcpSyncPreviewDialog.items.filter((item) => item.action === McpSyncAction.McpSyncActionRemove),
 );
-const syncDialogProjectTargets = computed(() =>
-  syncDialogTargetGroups.value.filter((group) => group.key !== "global"),
-);
-
-const pickerApplyDanger = computed(
-  () =>
-    pickerPendingDiff.value.toAdd.length === 0 &&
-    pickerPendingDiff.value.toRemove.length > 0,
-);
-
-// 项目 agent 选择器的部分失败按 mcp 名字挂在卡片上，弹窗关闭后仍可见。
-function pickerWarning(serverName: string): string | null {
-  return props.workspace.projectPickerWarnings.value[serverName] ?? null;
-}
-
-// 卡片同步结果同理：弹窗关闭后结果要留在触发它的卡片上。
-function cardSyncResult(serverName: string): { text: string; failed: boolean } | null {
-  const notice = mcpCardSyncNotice.value;
-  if (!notice || notice.serverName !== serverName) return null;
-  return { text: notice.text, failed: notice.failed };
-}
 </script>
 
 <template>
   <Teleport defer to="#workspace-panel-actions">
+    <button
+      class="primary-button"
+      :disabled="runningAction"
+      type="button"
+      @click="openMcpSync"
+    >
+      同步
+    </button>
     <button
       class="secondary-button"
       :disabled="runningAction"
       type="button"
       @click="openMcpCreateDialog"
     >
-      新增
+      新增 MCP 服务
+    </button>
+    <button
+      class="secondary-button"
+      :disabled="runningAction"
+      type="button"
+      @click="openMcpPathCreateDialog"
+    >
+      新增 MCP 路径
     </button>
   </Teleport>
 
   <section class="manager-stack manager-stack--stretch">
-    <article class="manager-panel manager-panel--fill">
-      <div class="manager-panel-section manager-panel-section--fill">
-        <AppLoadError
-          v-if="loadError"
-          :message="loadError"
-          :retrying="runningAction"
-          @retry="retryWorkspaceState"
-        />
-        <template v-if="configMcps.length">
-          <div class="manager-stack manager-scroll-region">
-            <McpCard
-              v-for="mcp in configMcps"
-              :key="mcp.name"
-              :mcp="mcp"
-              :inspection="inspectionMap.get(mcp.name) ?? null"
-              :loading="runningAction"
-              :projects="projectEntriesWithAgents"
-              :target-ids="targetIds"
-              :warning="pickerWarning(mcp.name)"
-              :sync-result="cardSyncResult(mcp.name)"
-              @edit-mcp="openMcpEditDialog"
-              @request-delete-mcp="openMcpDeleteDialog"
-              @toggle-mcp-target="handleToggleMcpTarget"
-              @open-project-agent-picker="openProjectAgentPickerForMcp"
-              @sync-mcp="openMcpCardSyncDialog"
-            />
-          </div>
-        </template>
-        <div v-else class="empty-state">当前还没有 mcp。</div>
-      </div>
-    </article>
+    <AppLoadError
+      v-if="loadError"
+      :message="loadError"
+      :retrying="runningAction"
+      @retry="retryWorkspaceState"
+    />
+    <div v-if="runningAction" class="loading-pill">正在检查状态...</div>
+
+    <!-- 左列 = MCP 服务，右列 = MCP 路径；两列各自独立滚动。 -->
+    <div class="manager-split">
+      <section class="manager-split__col">
+        <div class="manager-split__header">
+          <span>MCP 服务 · {{ configMcps.length }} 项</span>
+        </div>
+        <div class="manager-scroll-region">
+          <template v-if="configMcps.length">
+            <div class="manager-stack">
+              <McpCard
+                v-for="mcp in configMcps"
+                :key="mcp.name"
+                :mcp="mcp"
+                :inspection="inspectionMap.get(mcp.name) ?? null"
+                :loading="runningAction"
+                @edit-mcp="openMcpEditDialog"
+                @request-delete-mcp="openMcpDeleteDialog"
+              />
+            </div>
+          </template>
+          <div v-else class="empty-state">当前还没有 mcp。</div>
+        </div>
+      </section>
+
+      <!-- MCP 路径：接受 MCP 分发的命名条目（路径 + 格式 + 前缀），与技能
+           路径互不约束。 -->
+      <section class="manager-split__col manager-split__col--secondary">
+        <div class="manager-split__header">
+          <span>MCP 路径 · {{ configMcpPaths.length }} 项</span>
+        </div>
+        <div class="manager-scroll-region">
+          <template v-if="configMcpPaths.length">
+            <div class="manager-target-list">
+              <AppCard
+                v-for="path in configMcpPaths"
+                :key="path.name"
+              >
+                <template #header>
+                  <span class="manager-target-row__name-text">{{ path.name }}</span>
+                </template>
+                <template #ext>
+                  <div class="manager-target-row__actions">
+                    <button
+                      class="secondary-button"
+                      :disabled="runningAction"
+                      type="button"
+                      @click="openMcpPathEditDialog(path)"
+                    >
+                      编辑
+                    </button>
+                    <button
+                      class="danger-button"
+                      :disabled="runningAction"
+                      type="button"
+                      @click="openMcpPathDeleteDialog(path.name)"
+                    >
+                      删除
+                    </button>
+                  </div>
+                </template>
+                <div class="manager-target-row__meta manager-target-row__meta--paths">
+                  <span><strong>配置</strong><span>{{ path.configPath }}</span></span>
+                  <span v-if="path.configPrefix"><strong>前缀</strong><span>{{ path.configPrefix }}</span></span>
+                  <span class="manager-target-row__format">{{ path.mcpFormatDescription }}</span>
+                </div>
+              </AppCard>
+            </div>
+          </template>
+          <div v-else class="empty-state">当前没有 MCP 路径。从预设（按工具预填）或自定义路径开始。</div>
+        </div>
+      </section>
+    </div>
   </section>
 
-  <!-- --- mcp create / delete / sync confirm / apply preview / target remove --- -->
+  <!-- --- 矩阵同步弹窗 + 聚合预演确认 --- -->
+
+  <McpSyncDialog
+    ref="mcpSyncDialogRef"
+    :open="mcpSyncDialog.open"
+    :config-document="configDocument ?? null"
+    :inspection="inspection ?? null"
+    :loading="mcpSyncDialog.loading || runningAction"
+    @close="closeMcpSyncDialog"
+    @confirm="handleConfirmMcpSync"
+  />
+
+  <ConfirmDialog
+    :open="mcpSyncPreviewDialog.open"
+    dialog-class-name="manager-import-dialog"
+    eyebrow="MCP 同步"
+    title="确认同步"
+    title-id="mcp-sync-preview-dialog-title"
+    cancel-label="取消"
+    confirm-button-class-name="primary-button"
+    :confirm-label="mcpSyncPreviewDialog.loading ? '同步中...' : '确认同步'"
+    :loading="mcpSyncPreviewDialog.loading"
+    :error="mcpSyncPreviewDialog.error"
+    description="勾选集合就是期望状态：确认后按清单收敛，未列出的已装条目只做刷新。"
+    @close="closeMcpSyncPreviewDialog"
+    @confirm="confirmMcpSyncExecute"
+  >
+    <div class="manager-mcp-sync-preview">
+      <section v-if="confirmCreateItems.length" class="manager-mcp-sync-preview__group">
+        <h4 class="manager-mcp-sync-preview__title">将写入 {{ confirmCreateItems.length }} 项</h4>
+        <div
+          v-for="item in confirmCreateItems"
+          :key="`${item.serverName}→${item.pathId}`"
+          class="manager-mcp-sync-preview__row"
+        >
+          <span class="manager-mcp-sync-preview__pair">
+            {{ item.serverName }} → {{ item.pathId }}
+          </span>
+          <!-- 构造失败的创建项不进本清单（走 failedCreates 分组），这里必然携带内容 -->
+          <details class="manager-mcp-sync-preview__details">
+            <summary>写入内容</summary>
+            <pre class="manager-pre">{{ item.content }}</pre>
+          </details>
+        </div>
+      </section>
+      <section v-if="confirmRemoveItems.length" class="manager-mcp-sync-preview__group">
+        <h4 class="manager-mcp-sync-preview__title">将移除 {{ confirmRemoveItems.length }} 项</h4>
+        <div
+          v-for="item in confirmRemoveItems"
+          :key="`${item.serverName}→${item.pathId}`"
+          class="manager-mcp-sync-preview__row"
+        >
+          <span class="manager-mcp-sync-preview__pair">
+            {{ item.serverName }} → {{ item.pathId }}
+          </span>
+        </div>
+      </section>
+      <section
+        v-if="mcpSyncPreviewDialog.failedCreates.length"
+        class="manager-mcp-sync-preview__group"
+      >
+        <h4 class="manager-mcp-sync-preview__title">
+          无法写入 {{ mcpSyncPreviewDialog.failedCreates.length }} 项（已跳过）
+        </h4>
+        <div
+          v-for="item in mcpSyncPreviewDialog.failedCreates"
+          :key="`failed-${item.serverName}→${item.pathId}`"
+          class="manager-mcp-sync-preview__row"
+        >
+          <span class="manager-mcp-sync-preview__pair">
+            {{ item.serverName }} → {{ item.pathId }}
+          </span>
+          <span class="manager-mcp-sync-preview__error">{{ item.detail }}</span>
+        </div>
+      </section>
+    </div>
+  </ConfirmDialog>
+
+  <!-- --- mcp create / delete / rename sync confirm --- -->
 
   <McpCreateDialog
     :error="mcpCreateDialog.form.errors.form ?? null"
@@ -204,156 +318,52 @@ function cardSyncResult(serverName: string): { text: string; failed: boolean } |
     title-id="mcp-sync-confirm-dialog-title"
     cancel-label="取消"
     confirm-button-class-name="primary-button"
-    :confirm-label="mcpSyncConfirmDialog.loading ? '同步中...' : `同步 ${mcpSyncConfirmDialog.targetIds.length} 个目标`"
+    :confirm-label="mcpSyncConfirmDialog.loading ? '同步中...' : `同步 ${mcpSyncConfirmDialog.pathIds.length} 条路径`"
     :loading="mcpSyncConfirmDialog.loading"
     :error="mcpSyncConfirmDialog.error"
-    :description="`该 mcp 已安装到 ${mcpSyncConfirmDialog.targetIds.length} 个目标，重命名后需要同步更新这些目标的配置。`"
+    :description="`该 mcp 已安装到 ${mcpSyncConfirmDialog.pathIds.length} 条 MCP 路径，重命名后需要同步更新这些路径的配置。`"
     @close="closeMcpSyncConfirmDialog"
     @confirm="handleConfirmSyncMcpConfig"
   />
 
-  <ConfirmDialog
-    :open="mcpApplyPreviewDialog.open"
-    dialog-class-name="manager-import-dialog"
-    eyebrow="mcp"
-    :title="`预览: ${mcpApplyPreviewDialog.serverName} → ${mcpApplyPreviewDialog.targetId ? formatTargetLabel(mcpApplyPreviewDialog.targetId) : ''}`"
-    title-id="mcp-apply-preview-dialog-title"
-    cancel-label="取消"
-    confirm-button-class-name="primary-button"
-    :confirm-label="mcpApplyPreviewDialog.submitting ? '写入中...' : '确认写入'"
-    :loading="mcpApplyPreviewDialog.loading || mcpApplyPreviewDialog.submitting"
-    :error="mcpApplyPreviewDialog.error"
-    @close="closeMcpApplyPreviewDialog"
-    @confirm="handleConfirmApplyMcpPreview"
-  >
-    <template v-if="mcpApplyPreviewDialog.preview">
-      <p class="manager-skill-description">
-        将写入 {{ mcpApplyPreviewDialog.preview.configPath }}（{{ mcpApplyPreviewDialog.preview.format }}）
-      </p>
-      <pre class="manager-pre">{{ mcpApplyPreviewDialog.preview.content }}</pre>
-    </template>
-  </ConfirmDialog>
+  <!-- --- mcp path create / delete --- -->
+
+  <McpPathCreateDialog
+    :form="mcpPathDialog.form"
+    :open="mcpPathDialog.open"
+    :loading="mcpPathDialog.loading || runningAction"
+    :error="mcpPathDialog.error"
+    :presets="mcpPathDialog.presets"
+    :presets-loading="mcpPathDialog.presetsLoading"
+    :presets-error="mcpPathDialog.presetsError"
+    :format-infos="mcpPathDialog.formatInfos"
+    :format-infos-loading="mcpPathDialog.formatInfosLoading"
+    :format-infos-error="mcpPathDialog.formatInfosError"
+    :format-description="mcpPathDialog.formatDescription"
+    :format-examples="mcpPathDialog.formatExamples"
+    @close="closeMcpPathDialog"
+    @confirm="handleSubmitMcpPath"
+    @clear-field-error="clearMcpPathFormError"
+    @apply-preset="handleApplyMcpPathPreset"
+    @select-config-type="handleSelectMcpPathConfigType"
+    @retry-load-presets="loadMcpPathPresets"
+    @retry-load-format-infos="loadMcpFormatInfos"
+    @pick-config-file="handlePickMcpPathConfigFile"
+  />
 
   <ConfirmDialog
-    :open="mcpTargetRemoveDialog.open"
+    :open="mcpPathDeleteDialog.open"
     dialog-class-name="manager-import-dialog"
-    eyebrow="mcp"
-    :title="`移除: ${mcpTargetRemoveDialog.serverName} 从 ${mcpTargetRemoveDialog.targetId ? formatTargetLabel(mcpTargetRemoveDialog.targetId) : ''}`"
-    title-id="mcp-target-remove-dialog-title"
+    eyebrow="MCP 路径"
+    :title="`删除 MCP 路径: ${mcpPathDeleteDialog.pathId ?? ''}`"
+    title-id="mcp-path-delete-dialog-title"
     cancel-label="取消"
     confirm-button-class-name="danger-button"
-    :confirm-label="mcpTargetRemoveDialog.loading ? '移除中...' : '确认移除'"
-    :loading="mcpTargetRemoveDialog.loading"
-    :error="mcpTargetRemoveDialog.error"
-    description="会从目标配置文件中移除该 mcp 节点。"
-    @close="closeMcpTargetRemoveDialog"
-    @confirm="confirmMcpTargetRemove"
+    :confirm-label="mcpPathDeleteDialog.loading ? '删除中...' : '确认删除'"
+    :loading="mcpPathDeleteDialog.loading"
+    :error="mcpPathDeleteDialog.error"
+    :description="mcpPathDeleteDialog.cleanupServerNames?.length ? `将一并移除写入该路径的条目：${mcpPathDeleteDialog.cleanupServerNames.join('、')}` : '该路径里没有 Reins 写入的条目，删除只移除登记。'"
+    @close="closeMcpPathDeleteDialog"
+    @confirm="handleConfirmDeleteMcpPath(true)"
   />
-
-  <ConfirmDialog
-    :open="mcpCardSyncDialog.open"
-    dialog-class-name="manager-import-dialog"
-    eyebrow="mcp"
-    :title="`同步 ${mcpCardSyncDialog.serverName} 到 ${mcpCardSyncDialog.targetIds.length} 个目标`"
-    title-id="mcp-card-sync-dialog-title"
-    cancel-label="取消"
-    confirm-button-class-name="primary-button"
-    :confirm-label="mcpCardSyncDialog.loading ? '同步中...' : '开始同步'"
-    :loading="mcpCardSyncDialog.loading"
-    :error="mcpCardSyncDialog.error"
-    description="把当前配置写入这些已安装该 mcp 的目标配置文件；名称不变，只覆盖连接参数。"
-    @close="closeMcpCardSyncDialog"
-    @confirm="confirmMcpCardSync"
-  >
-    <div class="manager-sync-dialog__target-groups">
-      <!-- 全局单独一段，项目各自一段 （带「项目」小标题区分），
-           与卡片上的「全局 / 项目」分组口径一致 -->
-      <div class="manager-sync-dialog__target-section">
-        <span class="manager-sync-dialog__target-section-label">全局</span>
-        <div class="manager-sync-dialog__target-section-body">
-          <p v-if="syncDialogGlobalTargets.length > 0" class="manager-sync-dialog__target-list">
-            {{ syncDialogGlobalTargets.map((id) => formatTargetLabel(id)).join("、") }}
-          </p>
-          <p v-else class="manager-sync-dialog__target-empty">未安装到全局 target</p>
-        </div>
-      </div>
-
-      <div v-if="syncDialogProjectTargets.length > 0" class="manager-sync-dialog__target-section">
-        <span class="manager-sync-dialog__target-section-label">项目</span>
-        <div class="manager-sync-dialog__target-section-body">
-          <div
-            v-for="group in syncDialogProjectTargets"
-            :key="group.key"
-            class="manager-sync-dialog__target-row"
-          >
-            <span class="manager-sync-dialog__target-row-label">{{ group.label }}：</span>
-            <span class="manager-sync-dialog__target-row-list">
-              {{ group.targetIds.map((id) => pickerAgentLabel(id)).join("、") }}
-            </span>
-          </div>
-        </div>
-      </div>
-    </div>
-  </ConfirmDialog>
-
-  <!-- --- project agent picker --- -->
-
-  <ProjectAgentPickerDialog
-    :open="projectAgentPickerDialog.open"
-    :loading="projectAgentPickerDialog.loading || runningAction"
-    :agents="pickerAgents"
-    :context-name="projectAgentPickerDialog.contextName"
-    :project-id="pickerProjectId"
-    :installed-agent-ids="pickerInstalledAgentIds"
-    :desired-agent-ids="projectAgentPickerDialog.desiredAgentIds"
-    :pending-diff="pickerPendingDiff"
-    :transport="projectAgentPickerDialog.transport"
-    @close="closeProjectAgentPickerDialog"
-    @toggle-agent="toggleProjectAgentPickerAgent"
-    @apply="openProjectAgentPickerConfirm"
-  />
-
-  <ConfirmDialog
-    :open="projectAgentPickerDialog.confirmOpen"
-    dialog-class-name="manager-import-dialog"
-    eyebrow="mcp · project"
-    :title="`应用 MCP ${projectAgentPickerDialog.contextName} 到 ${pickerProjectId}`"
-    title-id="project-agent-apply-dialog-title"
-    cancel-label="取消"
-    :confirm-button-class-name="pickerApplyDanger ? 'danger-button' : 'primary-button'"
-    :confirm-label="projectAgentPickerDialog.loading ? '应用中...' : '确认应用'"
-    :loading="projectAgentPickerDialog.loading || runningAction"
-    description="确认后会将变更写入各 agent 目录下的 MCP 配置文件。"
-    @close="closeProjectAgentPickerConfirm"
-    @confirm="handleApplyProjectAgentPicker"
-  >
-    <div class="manager-stack">
-      <div
-        v-if="pickerPendingDiff.toAdd.length > 0"
-        class="manager-target-buttons-group"
-      >
-        <span class="manager-target-buttons-group__label">新增</span>
-        <div class="manager-target-buttons">
-          <span
-            v-for="id in pickerPendingDiff.toAdd"
-            :key="id"
-            class="pill success-pill"
-          >{{ pickerAgentLabel(id) }}</span>
-        </div>
-      </div>
-      <div
-        v-if="pickerPendingDiff.toRemove.length > 0"
-        class="manager-target-buttons-group"
-      >
-        <span class="manager-target-buttons-group__label">移除</span>
-        <div class="manager-target-buttons">
-          <span
-            v-for="id in pickerPendingDiff.toRemove"
-            :key="id"
-            class="pill danger-pill"
-          >{{ pickerAgentLabel(id) }}</span>
-        </div>
-      </div>
-    </div>
-  </ConfirmDialog>
 </template>
