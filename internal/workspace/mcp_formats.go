@@ -29,6 +29,7 @@ type mcpConfigFileFormat uint8
 const (
 	mcpFormatJSON mcpConfigFileFormat = iota
 	mcpFormatTOML
+	mcpFormatYAML
 )
 
 // shapeExample：编辑页展示的一段写入形态示例：形态名 + 已序列化的正文。
@@ -63,10 +64,11 @@ type mcpFormatWriter interface {
 	defaultJSONRoot() any
 	// ensureFormatSupported：文件格式强校验（GrokBuild 只接受 TOML）；默认放行。
 	ensureFormatSupported(format mcpConfigFileFormat) error
-	// desiredTomlEntry / desiredJSONEntry：构造 desired 条目；不支持的类型按
-	// 既定文案报错。
+	// desiredTomlEntry / desiredJSONEntry / desiredYAMLEntry：构造 desired
+	// 条目；不支持的类型按既定文案报错。
 	desiredTomlEntry(server *ResolvedMcpConfig) (any, error)
 	desiredJSONEntry(server *ResolvedMcpConfig) (any, error)
+	desiredYAMLEntry(server *ResolvedMcpConfig) (*yaml.Node, error)
 	// entryKeyFor：读取侧的条目 key：默认与 server 名一致；dsh 按清洗后的
 	// serverName。
 	entryKeyFor(name string) string
@@ -74,8 +76,8 @@ type mcpFormatWriter interface {
 	// 入口。文件形态 writer 全部委托 mcps.go 的引擎；dsh 有自己的 patch 读写。
 	readExistingEntries(prefix string, configPath string) (map[string]any, error)
 	previewEntry(configPath string, server *ResolvedMcpConfig) (string, string, error)
-	applyEntry(target *ResolvedTargetConfig, configPath string, server *ResolvedMcpConfig) error
-	removeEntry(target *ResolvedTargetConfig, configPath string, serverName string) (McpTargetMutationResult, error)
+	applyEntry(path *ResolvedMcpPath, configPath string, server *ResolvedMcpConfig) error
+	removeEntry(path *ResolvedMcpPath, configPath string, serverName string) (McpPathMutationResult, error)
 }
 
 // 全仓库唯一允许的 config_type 分发点（对齐 mcp_format_writer）。
@@ -89,6 +91,9 @@ func mcpFormatWriterFor(configType agents.McpConfigType) mcpFormatWriter {
 		return writerOpenCode
 	case agents.McpConfigDsh:
 		return writerDshPatch
+	case agents.McpConfigHermes:
+		// 旧配置归一后的兜底（parse 已把 hermes 归一为 common，不应到达）。
+		return writerCommon
 	}
 	// parse 阶段已校验枚举取值，不应到达。
 	return writerCommon
@@ -102,7 +107,8 @@ var (
 )
 
 // fileWriterBase：文件形态四个操作入口的默认实现（Rust trait 默认方法的 Go
-// 对应物）——全部委托 mcps.go 的共享引擎，嵌入即得。引擎要回调外层 writer
+// 对应物）——全部委托 mcps.go 的共享引擎，嵌入即得；YAML 条目构造默认拒绝
+// （只有声明支持 YAML 载体的方言覆写）。引擎要回调外层 writer
 // 本体（ensureFormatSupported、desired 条目构造等），嵌入基自身拿不到接收
 // 者，self 由 newFileWriter 在构造时回填；文件形态 writer 一律经它构造，
 // 不得直接以零值 struct 参与分发（self 为 nil 会空回调）。
@@ -115,6 +121,10 @@ func (b *fileWriterBase) initSelf(self mcpFormatWriter) {
 	b.self = self
 }
 
+func (b *fileWriterBase) desiredYAMLEntry(server *ResolvedMcpConfig) (*yaml.Node, error) {
+	return nil, errors.New("该 config type 不支持 YAML 载体。")
+}
+
 func (b *fileWriterBase) readExistingEntries(prefix string, configPath string) (map[string]any, error) {
 	return readFileEntries(b.self, prefix, configPath)
 }
@@ -123,12 +133,12 @@ func (b *fileWriterBase) previewEntry(configPath string, server *ResolvedMcpConf
 	return previewFileEntry(b.self, configPath, server)
 }
 
-func (b *fileWriterBase) applyEntry(target *ResolvedTargetConfig, configPath string, server *ResolvedMcpConfig) error {
-	return applyFileEntry(b.self, target, configPath, server)
+func (b *fileWriterBase) applyEntry(path *ResolvedMcpPath, configPath string, server *ResolvedMcpConfig) error {
+	return applyFileEntry(b.self, path, configPath, server)
 }
 
-func (b *fileWriterBase) removeEntry(target *ResolvedTargetConfig, configPath string, serverName string) (McpTargetMutationResult, error) {
-	return removeFileEntry(b.self, target, configPath, serverName)
+func (b *fileWriterBase) removeEntry(path *ResolvedMcpPath, configPath string, serverName string) (McpPathMutationResult, error) {
+	return removeFileEntry(b.self, path, configPath, serverName)
 }
 
 // newFileWriter：构造文件形态 writer 并回填嵌入基的 self。新增文件形态
@@ -153,7 +163,7 @@ type commonWriter struct{ fileWriterBase }
 func (w *commonWriter) prefixRequired() bool { return true }
 
 func (w *commonWriter) description() string {
-	return "通用 MCP 条目（标准 command/args/env），按配置文件扩展名写入 JSON 或 TOML 的 mcp 节点下。"
+	return "通用 MCP 条目（标准 command/args/env），按配置文件扩展名写入 JSON、TOML 或 YAML 的 mcp 节点下；YAML 载体的条目无 type 判别字段、空集合省略。"
 }
 
 func (w *commonWriter) shapeExamples(prefix string, serverName string) ([]shapeExample, error) {
@@ -190,6 +200,12 @@ func (w *commonWriter) desiredTomlEntry(server *ResolvedMcpConfig) (any, error) 
 
 func (w *commonWriter) desiredJSONEntry(server *ResolvedMcpConfig) (any, error) {
 	return desiredOpenAIJSONMCP(server)
+}
+
+// desiredYAMLEntry：common 的 YAML 载体条目（hermes config.yaml 同方言）：
+// 无 type 判别字段，空集合省略；headers 键与 JSON 形态一致。
+func (w *commonWriter) desiredYAMLEntry(server *ResolvedMcpConfig) (*yaml.Node, error) {
+	return desiredStandardYAMLEntry(server)
 }
 
 func (w *commonWriter) entryKeyFor(name string) string { return name }
@@ -417,6 +433,37 @@ func desiredOpencodeMCP(server *ResolvedMcpConfig) (any, error) {
 	return object, nil
 }
 
+// desiredStandardYAMLEntry：标准方言的 YAML 条目形态（hermes config.yaml
+// 契约）：stdio 是 command/args/env、远程是 url/headers，无 type 判别字段；
+// 空集合省略（headers 为空省略是官方示例口径）。键序即 YAML 落盘键序。
+func desiredStandardYAMLEntry(server *ResolvedMcpConfig) (*yaml.Node, error) {
+	switch server.Transport {
+	case TransportStdio:
+		if server.Command == nil || *server.Command == "" {
+			return nil, errors.New("stdio MCP 缺少 command")
+		}
+		pairs := [][2]*yaml.Node{{support.YStr("command"), support.YStr(*server.Command)}}
+		if len(server.Args) > 0 {
+			pairs = append(pairs, [2]*yaml.Node{support.YStr("args"), stringsNodeSeq(server.Args)})
+		}
+		if len(server.Env) > 0 {
+			pairs = append(pairs, [2]*yaml.Node{support.YStr("env"), stringMapNode(server.Env)})
+		}
+		return support.YMap(pairs...), nil
+	case TransportHTTP, TransportSSE:
+		if server.URL == nil || *server.URL == "" {
+			return nil, errors.New("远程 MCP 缺少 mcp 链接")
+		}
+		pairs := [][2]*yaml.Node{{support.YStr("url"), support.YStr(*server.URL)}}
+		if len(server.Headers) > 0 {
+			pairs = append(pairs, [2]*yaml.Node{support.YStr("headers"), stringMapNode(server.Headers)})
+		}
+		return support.YMap(pairs...), nil
+	default:
+		return nil, fmt.Errorf("未知 transport：%s", server.Transport)
+	}
+}
+
 // 示例用的样例 server：与真实写入走同一 desired 构造路径，只是喂固定值。
 func exampleServer(name string) *ResolvedMcpConfig {
 	return &ResolvedMcpConfig{
@@ -468,7 +515,7 @@ func nestTOMLDocument(prefix string, serverName string, entry any) any {
 // ---------------------------------------------------------------------------
 
 // dsh 的 MCP server 是 Cordis 插件树里的 dsh-mcp-client 条目。Reins 只认
-// name 为该插件且 config.serverName 匹配的 insert 条目；定位与其它 target
+// name 为该插件且 config.serverName 匹配的 insert 条目；定位与其它 MCP 路径
 // 按 server key 定位的语义一致，条目 id 不参与定位。patch 文件其余内容
 // （无关插件、未知操作）原样保留，绝不整文件覆盖。
 const (
@@ -525,6 +572,10 @@ func (w *dshPatchWriter) desiredJSONEntry(*ResolvedMcpConfig) (any, error) {
 	return nil, errors.New("Dsh config type 仅支持 Cordis patch YAML。")
 }
 
+func (w *dshPatchWriter) desiredYAMLEntry(*ResolvedMcpConfig) (*yaml.Node, error) {
+	return nil, errors.New("Dsh config type 仅支持 Cordis patch YAML。")
+}
+
 func (w *dshPatchWriter) entryKeyFor(name string) string {
 	return dshServerName(name)
 }
@@ -534,7 +585,7 @@ func (w *dshPatchWriter) readExistingEntries(_ string, configPath string) (map[s
 }
 
 func (w *dshPatchWriter) previewEntry(configPath string, server *ResolvedMcpConfig) (string, string, error) {
-	// 与 JSON/TOML target 一致：preview 先确认文件可解析，再展示条目。
+	// 与 JSON/TOML 路径一致：preview 先确认文件可解析，再展示条目。
 	if _, err := support.ReadOps(configPath); err != nil {
 		return "", "", err
 	}
@@ -549,12 +600,12 @@ func (w *dshPatchWriter) previewEntry(configPath string, server *ResolvedMcpConf
 	return "yaml", content, nil
 }
 
-func (w *dshPatchWriter) applyEntry(_ *ResolvedTargetConfig, configPath string, server *ResolvedMcpConfig) error {
+func (w *dshPatchWriter) applyEntry(_ *ResolvedMcpPath, configPath string, server *ResolvedMcpConfig) error {
 	return applyDshPatchEntry(configPath, server)
 }
 
-func (w *dshPatchWriter) removeEntry(target *ResolvedTargetConfig, configPath string, serverName string) (McpTargetMutationResult, error) {
-	return removeDshPatchEntry(target, configPath, serverName)
+func (w *dshPatchWriter) removeEntry(path *ResolvedMcpPath, configPath string, serverName string) (McpPathMutationResult, error) {
+	return removeDshPatchEntry(path, configPath, serverName)
 }
 
 // dshServerName：dsh 要求 serverName 匹配 [A-Za-z0-9_-]{1,32}：非法字符折叠
@@ -775,18 +826,18 @@ func applyDshPatchEntry(configPath string, server *ResolvedMcpConfig) error {
 	return support.WriteOps(configPath, ops)
 }
 
-func removeDshPatchEntry(target *ResolvedTargetConfig, configPath string, serverName string) (McpTargetMutationResult, error) {
+func removeDshPatchEntry(path *ResolvedMcpPath, configPath string, serverName string) (McpPathMutationResult, error) {
 	claimedName := dshServerName(serverName)
 	ops, err := support.ReadOps(configPath)
 	if err != nil {
-		return McpTargetMutationResult{}, err
+		return McpPathMutationResult{}, err
 	}
 
 	opIndex, entryIndex, found := locateDshClaimedEntry(ops, claimedName)
 	if !found {
-		return McpTargetMutationResult{
+		return McpPathMutationResult{
 			ServerName:  serverName,
-			TargetID:    target.ID,
+			PathID:      path.Name,
 			UpdatedPath: nil,
 			Action:      "noop",
 			Detail:      "目标配置里不存在该 MCP。",
@@ -795,7 +846,7 @@ func removeDshPatchEntry(target *ResolvedTargetConfig, configPath string, server
 
 	list, err := dshInsertList(ops, opIndex)
 	if err != nil {
-		return McpTargetMutationResult{}, err
+		return McpPathMutationResult{}, err
 	}
 	list = append(list[:entryIndex], list[entryIndex+1:]...)
 	ops[opIndex].Content[1].Content = list
@@ -804,16 +855,16 @@ func removeDshPatchEntry(target *ResolvedTargetConfig, configPath string, server
 	}
 	// 删空后保留空列表文件（`[]`），与「不整文件覆盖」的合并语义一致。
 	if err := support.WriteOps(configPath, ops); err != nil {
-		return McpTargetMutationResult{}, err
+		return McpPathMutationResult{}, err
 	}
 
 	updatedPath := support.DisplayPath(configPath)
-	return McpTargetMutationResult{
+	return McpPathMutationResult{
 		ServerName:  serverName,
-		TargetID:    target.ID,
+		PathID:      path.Name,
 		UpdatedPath: &updatedPath,
 		Action:      "remove",
-		Detail:      fmt.Sprintf("已从 %s 移除 %s", target.ID, serverName),
+		Detail:      fmt.Sprintf("已从 %s 移除 %s", path.Name, serverName),
 	}, nil
 }
 

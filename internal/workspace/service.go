@@ -1,8 +1,8 @@
 // service.go：workspace 域的 Wails service 薄壳（对齐 Rust 版 workspace/
-// commands.rs 的 35 个命令）。职责与 Rust 命令层相同：诊断日志、来源拉取的
-// 取消槽登记、散参 → 域内 Input 的组装；核心行为全部在 *Inner 与共享的
-// BuildSync* 里。错误经 error 返回（Wails 转 Promise reject），文案由 inner
-// 保证与 Rust 逐字一致。
+// commands.rs 的命令面，2026-11-28 起为技能路径/MCP 路径散装模型）。职责
+// 与 Rust 命令层相同：诊断日志、来源拉取的取消槽登记、散参 → 域内 Input
+// 的组装；核心行为全部在 *Inner 与共享的 BuildSync* 里。错误经 error 返回
+// （Wails 转 Promise reject），文案由 inner 保证与 Rust 逐字一致。
 package workspace
 
 import (
@@ -43,19 +43,24 @@ func (s *WorkspaceService) env() *support.Environment {
 	return support.FromEnv(agents.Redirects())
 }
 
-// GetTargetPresets 对齐 get_target_presets。
-func (s *WorkspaceService) GetTargetPresets() []TargetPreset {
-	return TargetPresetsInner(s.env())
+// GetSkillPathPresets 对齐 get_skill_path_presets。
+func (s *WorkspaceService) GetSkillPathPresets() []SkillPathPreset {
+	return GetSkillPathPresetsInner(s.env())
+}
+
+// GetMcpPathPresets 对齐 get_mcp_path_presets。
+func (s *WorkspaceService) GetMcpPathPresets() []McpPathPreset {
+	return GetMcpPathPresetsInner(s.env())
+}
+
+// GetMcpFormatInfos 对齐 get_mcp_format_infos。
+func (s *WorkspaceService) GetMcpFormatInfos() []McpFormatInfo {
+	return GetMcpFormatInfosInner()
 }
 
 // GetWorkspaceState 对齐 get_workspace_state。
 func (s *WorkspaceService) GetWorkspaceState() (*WorkspaceState, error) {
 	return WorkspaceStateInner(s.store)
-}
-
-// SelectProjectPath 对齐 select_project_path。
-func (s *WorkspaceService) SelectProjectPath(projectPath *string) (*WorkspaceSelection, error) {
-	return SelectProjectPathInner(s.dialog, projectPath)
 }
 
 // SelectLocalSkillSourceDirectory 对齐 select_local_skill_source_directory。
@@ -68,29 +73,27 @@ func (s *WorkspaceService) SelectSkillBatchImportFile() (*SkillBatchImportFile, 
 	return SelectSkillBatchImportFileInner(s.dialog)
 }
 
-// SelectTargetSkillDirectory 对齐 select_target_skill_directory。
-func (s *WorkspaceService) SelectTargetSkillDirectory(currentPath *string) (*WorkspaceSelection, error) {
-	return SelectTargetSkillDirectoryInner(s.dialog, currentPath)
+// SelectSkillPathDirectory 对齐 select_skill_path_directory。
+func (s *WorkspaceService) SelectSkillPathDirectory(currentPath *string) (*WorkspaceSelection, error) {
+	return SelectSkillPathDirectoryInner(s.dialog, currentPath)
 }
 
-// SelectTargetMCPConfigFile 对齐 select_target_mcp_config_file。
-func (s *WorkspaceService) SelectTargetMCPConfigFile(currentPath *string) (*WorkspaceSelection, error) {
-	return SelectTargetMCPConfigFileInner(s.dialog, currentPath)
+// SelectMcpPathConfigFile 对齐 select_mcp_path_config_file。
+func (s *WorkspaceService) SelectMcpPathConfigFile(currentPath *string) (*WorkspaceSelection, error) {
+	return SelectMcpPathConfigFileInner(s.dialog, currentPath)
 }
 
-// ApplyMCPToTarget 对齐 apply_mcp_to_target。
-func (s *WorkspaceService) ApplyMCPToTarget(serverName string, targetID string) (*McpTargetMutationResult, error) {
-	return ApplyMCPToTargetInner(s.store, serverName, targetID)
+// PreviewMcpSync：聚合预演 MCP 矩阵同步（2026-11-28 新增，无 Rust 对应命令；
+// 逐路径 apply/remove/preview 命令已随矩阵同步删除，见决策记录
+// 2026-11-28-mcp-matrix-sync.md 第 5 条）。
+func (s *WorkspaceService) PreviewMcpSync(input McpSyncInput) (*McpSyncPreview, error) {
+	return PreviewMcpSyncInner(s.store, input)
 }
 
-// RemoveMCPFromTarget 对齐 remove_mcp_from_target。
-func (s *WorkspaceService) RemoveMCPFromTarget(serverName string, targetID string) (*McpTargetMutationResult, error) {
-	return RemoveMCPFromTargetInner(s.store, serverName, targetID)
-}
-
-// PreviewMCPTarget 对齐 preview_mcp_target。
-func (s *WorkspaceService) PreviewMCPTarget(serverName string, targetID string) (*McpTargetPreviewResult, error) {
-	return PreviewMCPTargetInner(s.store, serverName, targetID)
+// SyncMcpsToPaths：矩阵同步（2026-11-28 新增，无 Rust 对应命令）。
+func (s *WorkspaceService) SyncMcpsToPaths(input McpSyncInput) (*McpSyncResult, error) {
+	logger.Info(fmt.Sprintf("sync_mcps_to_paths cells=%d", len(input.Cells)))
+	return SyncMcpsToPathsInner(s.store, input)
 }
 
 // DiscoverGitSkills 对齐 discover_git_skills（clone/pull 到持久缓存再扫描）。
@@ -127,22 +130,60 @@ func (s *WorkspaceService) ImportBatchGitSkills(input BatchGitSkillImportInput) 
 	return ImportBatchGitSkillsInner(s.store, input)
 }
 
-// CreateWorkspaceTarget 对齐 create_workspace_target。
-func (s *WorkspaceService) CreateWorkspaceTarget(targetID string, skillDir string, configPath *string) (*WorkspaceTargetMutationResult, error) {
-	logger.Info(fmt.Sprintf("create_workspace_target target_id=%s", targetID))
-	return CreateWorkspaceTargetInner(s.store, RawTargetInput{TargetID: targetID, SkillDir: skillDir, ConfigPath: configPath})
+// CreateSkillPath 对齐 create_skill_path。
+func (s *WorkspaceService) CreateSkillPath(name string, dir string) (*WorkspacePathMutationResult, error) {
+	logger.Info(fmt.Sprintf("create_skill_path name=%s", name))
+	return CreateSkillPathInner(s.store, RawSkillPathInput{Name: name, Dir: dir})
 }
 
-// UpdateWorkspaceTarget 对齐 update_workspace_target。
-func (s *WorkspaceService) UpdateWorkspaceTarget(currentTargetID string, targetID string, skillDir string, configPath *string) (*WorkspaceTargetMutationResult, error) {
-	logger.Info(fmt.Sprintf("update_workspace_target current_target_id=%s target_id=%s", currentTargetID, targetID))
-	return UpdateWorkspaceTargetInner(s.store, currentTargetID, RawTargetInput{TargetID: targetID, SkillDir: skillDir, ConfigPath: configPath})
+// UpdateSkillPath 对齐 update_skill_path。
+func (s *WorkspaceService) UpdateSkillPath(currentName string, name string, dir string) (*WorkspacePathMutationResult, error) {
+	logger.Info(fmt.Sprintf("update_skill_path current_name=%s name=%s", currentName, name))
+	return UpdateSkillPathInner(s.store, currentName, RawSkillPathInput{Name: name, Dir: dir})
 }
 
-// DeleteWorkspaceTarget 对齐 delete_workspace_target。
-func (s *WorkspaceService) DeleteWorkspaceTarget(targetID string) (*WorkspaceTargetMutationResult, error) {
-	logger.Info(fmt.Sprintf("delete_workspace_target target_id=%s", targetID))
-	return DeleteWorkspaceTargetInner(s.store, targetID)
+// DeleteSkillPath 对齐 delete_skill_path；cleanup=true 时一并卸载受管链接。
+func (s *WorkspaceService) DeleteSkillPath(name string, cleanup bool) (*WorkspacePathMutationResult, error) {
+	logger.Info(fmt.Sprintf("delete_skill_path name=%s cleanup=%t", name, cleanup))
+	return DeleteSkillPathInner(s.store, name, cleanup)
+}
+
+// PreviewSkillPathCleanup 对齐 preview_skill_path_cleanup。
+func (s *WorkspaceService) PreviewSkillPathCleanup(name string) (*SkillPathCleanupPreview, error) {
+	return PreviewSkillPathCleanupInner(s.store, name)
+}
+
+// CreateMcpPath 对齐 create_mcp_path。
+func (s *WorkspaceService) CreateMcpPath(name string, configPath string, configType string, configPrefix string) (*WorkspacePathMutationResult, error) {
+	logger.Info(fmt.Sprintf("create_mcp_path name=%s config_type=%s", name, configType))
+	return CreateMcpPathInner(s.store, RawMcpPathInput{
+		Name:         name,
+		ConfigPath:   configPath,
+		ConfigType:   configType,
+		ConfigPrefix: configPrefix,
+	})
+}
+
+// UpdateMcpPath 对齐 update_mcp_path：config_type 保留存量值（客户端不传）。
+func (s *WorkspaceService) UpdateMcpPath(currentName string, name string, configPath string, configPrefix string) (*WorkspacePathMutationResult, error) {
+	logger.Info(fmt.Sprintf("update_mcp_path current_name=%s name=%s", currentName, name))
+	return UpdateMcpPathInner(s.store, currentName, RawMcpPathInput{
+		Name:         name,
+		ConfigPath:   configPath,
+		ConfigPrefix: configPrefix,
+	})
+}
+
+// DeleteMcpPath 对齐 delete_mcp_path；cleanup=true 时一并移除 Reins 写入的
+// 条目。
+func (s *WorkspaceService) DeleteMcpPath(name string, cleanup bool) (*WorkspacePathMutationResult, error) {
+	logger.Info(fmt.Sprintf("delete_mcp_path name=%s cleanup=%t", name, cleanup))
+	return DeleteMcpPathInner(s.store, name, cleanup)
+}
+
+// PreviewMcpPathCleanup 对齐 preview_mcp_path_cleanup。
+func (s *WorkspaceService) PreviewMcpPathCleanup(name string) (*McpPathCleanupPreview, error) {
+	return PreviewMcpPathCleanupInner(s.store, name)
 }
 
 // CreateWorkspaceMCP 对齐 create_workspace_mcp：created_at 由命令层填
@@ -179,7 +220,9 @@ func (s *WorkspaceService) CreateWorkspaceMCP(
 	})
 }
 
-// UpdateWorkspaceMCP 对齐 update_workspace_mcp：更新不携带 created_at。
+// UpdateWorkspaceMCP 对齐 update_workspace_mcp：更新不携带 created_at；
+// 改名时由后端在锁内一次完成登记更新与已装路径重写（apply 新名 + remove
+// 旧名），前端不再串行逐路径调用。
 func (s *WorkspaceService) UpdateWorkspaceMCP(
 	serverName string,
 	name string,
@@ -228,27 +271,9 @@ func (s *WorkspaceService) DeleteSkillSources(sourceIDs []string) error {
 	return DeleteSkillSourcesInner(s.store, sourceIDs)
 }
 
-// CreateWorkspaceProject 对齐 create_workspace_project。
-func (s *WorkspaceService) CreateWorkspaceProject(input ProjectMutationInput) (*WorkspaceTargetMutationResult, error) {
-	logger.Info(fmt.Sprintf("create_workspace_project project_id=%s", input.ProjectID))
-	return CreateWorkspaceProjectInner(s.store, input)
-}
-
-// UpdateWorkspaceProject 对齐 update_workspace_project。
-func (s *WorkspaceService) UpdateWorkspaceProject(input ProjectMutationInput) (*WorkspaceTargetMutationResult, error) {
-	logger.Info(fmt.Sprintf("update_workspace_project project_id=%s", input.ProjectID))
-	return UpdateWorkspaceProjectInner(s.store, input)
-}
-
-// DeleteWorkspaceProject 对齐 delete_workspace_project。
-func (s *WorkspaceService) DeleteWorkspaceProject(projectID string) (*WorkspaceTargetMutationResult, error) {
-	logger.Info(fmt.Sprintf("delete_workspace_project project_id=%s", projectID))
-	return DeleteWorkspaceProjectInner(s.store, projectID)
-}
-
-// GetSyncTargetOptions 对齐 get_sync_target_options。
-func (s *WorkspaceService) GetSyncTargetOptions() ([]SyncTargetOption, error) {
-	return BuildSyncTargetOptions(s.store)
+// GetSyncPathOptions 对齐 get_sync_path_options。
+func (s *WorkspaceService) GetSyncPathOptions() ([]SyncPathOption, error) {
+	return BuildSyncPathOptions(s.store)
 }
 
 // GetSyncSkillOptions 对齐 get_sync_skill_options：进入取数前登记取消槽，
@@ -258,9 +283,9 @@ func (s *WorkspaceService) GetSyncSkillOptions(sourceID string) (*SyncSkillOptio
 	return BuildSyncSkillOptions(ctx, s.store, sourceID)
 }
 
-// SyncSourceToTargets 对齐 sync_source_to_targets。
-func (s *WorkspaceService) SyncSourceToTargets(input SourceSyncInput) (*SourceSyncResult, error) {
-	return SyncSourceToTargetsInner(s.store, input)
+// SyncSourceToPaths 对齐 sync_source_to_paths。
+func (s *WorkspaceService) SyncSourceToPaths(input SourceSyncInput) (*SourceSyncResult, error) {
+	return SyncSourceToPathsInner(s.store, input)
 }
 
 // PreviewSourceSyncConflicts 对齐 preview_source_sync_conflicts。
@@ -269,13 +294,13 @@ func (s *WorkspaceService) PreviewSourceSyncConflicts(input SourceSyncInput) ([]
 }
 
 // RemoveSourceSync 对齐 remove_source_sync。
-func (s *WorkspaceService) RemoveSourceSync(sourceID string, targetIDs []string) (*SourceSyncResult, error) {
-	return RemoveSourceSyncInner(s.store, sourceID, targetIDs)
+func (s *WorkspaceService) RemoveSourceSync(sourceID string, pathNames []string) (*SourceSyncResult, error) {
+	return RemoveSourceSyncInner(s.store, sourceID, pathNames)
 }
 
-// RemoveTargetSkillLink 对齐 remove_target_skill_link。
-func (s *WorkspaceService) RemoveTargetSkillLink(targetID string, destinationPath string) (*SkillSyncItem, error) {
-	return RemoveTargetSkillLinkInner(s.store, targetID, destinationPath)
+// RemoveSkillPathLink 对齐 remove_skill_path_link。
+func (s *WorkspaceService) RemoveSkillPathLink(pathName string, destinationPath string) (*SkillSyncItem, error) {
+	return RemovePathSkillLinkInner(s.store, pathName, destinationPath)
 }
 
 // RefreshGitSkillSource 对齐 refresh_git_skill_source：同 get_sync_skill_options，

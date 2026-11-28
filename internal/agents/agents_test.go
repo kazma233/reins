@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -19,7 +20,6 @@ import (
 // （Rust agents_registry_is_consistent）
 func TestAgentsRegistryConsistency(t *testing.T) {
 	keys := map[string]bool{}
-	targets := map[string]bool{}
 	providers := map[ProviderApp]bool{}
 	wireIDs := map[string]bool{}
 	for i := range AgentSpecs {
@@ -28,12 +28,6 @@ func TestAgentsRegistryConsistency(t *testing.T) {
 			t.Fatalf("key 重复：%s", spec.Key)
 		}
 		keys[spec.Key] = true
-		if spec.TargetID != "" {
-			if targets[spec.TargetID] {
-				t.Fatalf("target_id 重复：%s", spec.TargetID)
-			}
-			targets[spec.TargetID] = true
-		}
 		if spec.ProviderApp != "" {
 			if providers[spec.ProviderApp] {
 				t.Fatalf("provider_app 重复：%s", spec.ProviderApp)
@@ -54,11 +48,11 @@ func TestAgentsRegistryConsistency(t *testing.T) {
 		}
 	}
 
-	// 清单驱动的重定向变量表：恰好五个官方变量、无重复（GLOSSARY 红线：
+	// 清单驱动的重定向变量表：恰好六个官方变量、无重复（GLOSSARY 红线：
 	// support 不许再写第二张表，这里就是唯一那张）。
 	want := map[string]bool{
 		"GROK_HOME": true, "PI_CODING_AGENT_DIR": true, "CODEX_HOME": true,
-		"CLAUDE_CONFIG_DIR": true, "DSH_HOME": true,
+		"CLAUDE_CONFIG_DIR": true, "DSH_HOME": true, "HERMES_HOME": true,
 	}
 	got := map[string]bool{}
 	for _, redirect := range Redirects() {
@@ -119,44 +113,18 @@ func TestProviderAppsOrderAndLabels(t *testing.T) {
 	}
 }
 
-func templateName(entry TemplateEntry) string {
-	switch entry {
-	case TemplateStandard:
-		return "Standard"
-	case TemplateFollowEnv:
-		return "FollowEnv"
-	case TemplateAbsent:
-		return "Absent"
-	default:
-		return fmt.Sprintf("TemplateEntry(%d)", uint8(entry))
-	}
-}
-
-func projectPath(layout *ProjectLayout) string {
-	if layout == nil {
-		return "-"
-	}
-	return layout.SkillDir
-}
-
-func projectMcp(layout *ProjectLayout) string {
-	if layout == nil || layout.McpConfigPath == "" {
-		return "-"
-	}
-	return layout.McpConfigPath
-}
-
 // 派生等价快照：锁住清单现状的完整输出（字段值与顺序）。清单任何字段
 // 漂移都在这里失败，而不是悄悄改变各域派生结果。
 func TestAgentSpecSnapshot(t *testing.T) {
 	want := []string{
-		"codex|Codex|codex|codex|codex|mcp_servers|common|codex_home|~/.agents/skills|config.toml|.agents/skills|.codex/config.toml|Standard",
-		"claude|Claude Code|claude_code|claude|claude|mcpServers|common|claude_config_dir|skills|.claude.json|.claude/skills|.mcp.json|Standard",
-		"opencode|OpenCode|opencode|opencode|opencode|mcp.servers|opencode|home|.config/opencode/skills|.config/opencode/opencode.json|.opencode/skills|opencode.json|Standard",
-		"zcode|ZCode|zcode|zcode|zcode|mcp.servers|common|home|.zcode/skills|.zcode/cli/config.json|.zcode/skills|.zcode/config.json|Standard",
-		"grokbuild|Grok Build|grokbuild|grokbuild|grokbuild|mcp_servers|grokbuild|grok_home|skills|config.toml|.grok/skills|.grok/config.toml|FollowEnv",
-		"pi|Pi|pi|pi|pi|mcpServers|common|pi_agent_dir|skills|mcp.json|.pi/skills|.pi/mcp.json|Standard",
-		"dsh|DeepSeek Harness|dsh|dsh|dsh||dsh|dsh_home|skills|cordis.patch.yml|.dsh/skills|-|Absent",
+		"codex|Codex|codex|codex|mcp_servers|common|codex_home|~/.agents/skills|config.toml",
+		"claude|Claude Code|claude_code|claude|mcpServers|common|claude_config_dir|skills|.claude.json",
+		"opencode|OpenCode|opencode|opencode|mcp.servers|opencode|home|.config/opencode/skills|.config/opencode/opencode.json",
+		"zcode|ZCode|zcode|zcode|mcp.servers|common|home|.zcode/skills|.zcode/cli/config.json",
+		"grokbuild|Grok Build|grokbuild|grokbuild|mcp_servers|grokbuild|grok_home|skills|config.toml",
+		"pi|Pi|pi|pi|mcpServers|common|pi_agent_dir|skills|mcp.json",
+		"dsh|DeepSeek Harness|dsh|dsh||dsh|dsh_home|skills|cordis.patch.yml",
+		"hermes|HermesAgent|||mcp_servers|common|hermes_home|skills|config.yaml",
 	}
 	if len(AgentSpecs) != len(want) {
 		t.Fatalf("清单条目数不符：got %d want %d", len(AgentSpecs), len(want))
@@ -167,33 +135,13 @@ func TestAgentSpecSnapshot(t *testing.T) {
 		if globalMcp == "" {
 			globalMcp = "-"
 		}
-		got := fmt.Sprintf("%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s",
-			spec.Key, spec.Label, string(spec.SourceApp), spec.TargetID, string(spec.ProviderApp),
+		got := fmt.Sprintf("%s|%s|%s|%s|%s|%s|%s|%s|%s",
+			spec.Key, spec.Label, string(spec.SourceApp), string(spec.ProviderApp),
 			spec.Mcp.Prefix, string(spec.Mcp.ConfigType),
 			spec.Global.Root.Name, spec.Global.SkillDir, globalMcp,
-			projectPath(spec.Project), projectMcp(spec.Project),
-			templateName(spec.Template),
 		)
 		if got != w {
 			t.Fatalf("清单快照漂移[%d]：\ngot  %s\nwant %s", i, got, w)
-		}
-	}
-}
-
-// 未重定向时的 ~ 缩写前缀（默认模板路径与注释文案用）。
-func TestGlobalRootHomePrefix(t *testing.T) {
-	want := map[string]string{
-		"home":              "~",
-		"grok_home":         "~/.grok",
-		"pi_agent_dir":      "~/.pi/agent",
-		"codex_home":        "~/.codex",
-		"claude_config_dir": "~/.claude",
-		"dsh_home":          "~/.dsh",
-	}
-	for i := range AgentSpecs {
-		root := AgentSpecs[i].Global.Root
-		if root.HomePrefix() != want[root.Name] {
-			t.Fatalf("HomePrefix(%s) = %q want %q", root.Name, root.HomePrefix(), want[root.Name])
 		}
 	}
 }
@@ -203,7 +151,7 @@ func joinSegs(base string, parts ...string) string {
 	return base + sep + strings.Join(parts, sep)
 }
 
-// 未重定向的根解析：五个重定向根落 HOME 默认目录，Home 根落 HOME 本身
+// 未重定向的根解析：六个重定向根落 HOME 默认目录，Home 根落 HOME 本身
 // （Rust snapshot_builtin_target_defaults 的根级子集）。
 func TestGlobalRootResolveDefaultsToHome(t *testing.T) {
 	home := testsupport.TestDir(t, "agents-roots-default")
@@ -211,15 +159,25 @@ func TestGlobalRootResolveDefaultsToHome(t *testing.T) {
 	defer guard.Restore()
 	env := support.FromEnv(Redirects())
 
+	// hermes 的 Windows 默认目录是 %LOCALAPPDATA%\hermes（标准环境下等价于
+	// HOME\AppData\Local\hermes），多段目录按 OS 原生分隔符表达；pi 的两段
+	// 目录同理（nativeDefaultDir）。
+	hermesDefault := ".hermes"
+	piDefault := ".pi\\agent"
+	if runtime.GOOS == "windows" {
+		hermesDefault = "AppData\\Local\\hermes"
+	} else {
+		piDefault = ".pi/agent"
+	}
 	want := map[string]string{
 		"home": home,
-		// pi 的默认目录是 ".pi/agent"：Resolve 以平台分隔符接 HOME、清单
-		// 拼写原样保留（对齐 Rust），不清洗内嵌的 /。
-		"pi_agent_dir":      home + string(filepath.Separator) + ".pi/agent",
+		// 默认目录内的多段路径按平台分隔符接 HOME（nativeDefaultDir 口径）。
+		"pi_agent_dir":      home + string(filepath.Separator) + piDefault,
 		"grok_home":         joinSegs(home, ".grok"),
 		"codex_home":        joinSegs(home, ".codex"),
 		"claude_config_dir": joinSegs(home, ".claude"),
 		"dsh_home":          joinSegs(home, ".dsh"),
+		"hermes_home":       home + string(filepath.Separator) + hermesDefault,
 	}
 	for i := range AgentSpecs {
 		root := AgentSpecs[i].Global.Root
@@ -227,6 +185,20 @@ func TestGlobalRootResolveDefaultsToHome(t *testing.T) {
 		if !ok || got != want[root.Name] {
 			t.Fatalf("Resolve(%s) = %q ok=%v want %q", root.Name, got, ok, want[root.Name])
 		}
+	}
+}
+
+// HERMES_HOME 重定向生效（与 grok / pi 同口径，单独一测免得 GOOS 条件混杂）。
+func TestGlobalRootResolveHermesRedirect(t *testing.T) {
+	home := testsupport.TestDir(t, "agents-roots-hermes")
+	guard := testsupport.SetHome(t, home)
+	defer guard.Restore()
+	hermesHome := filepath.Join(home, "custom-hermes")
+	t.Setenv("HERMES_HOME", hermesHome)
+	env := support.FromEnv(Redirects())
+
+	if got, _ := RootHermesHome.Resolve(env); got != hermesHome {
+		t.Fatalf("HERMES_HOME 应生效：got %q want %q", got, hermesHome)
 	}
 }
 

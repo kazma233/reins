@@ -1,5 +1,5 @@
 // skills.go：技能/同步域——从 local/git 来源发现 skill、导入进 config、跨
-// target 装/卸目录链接。对齐 Rust 版 workspace/skills.rs。
+// 技能路径装/卸目录链接。对齐 Rust 版 workspace/skills.rs。
 package workspace
 
 import (
@@ -45,9 +45,9 @@ func includePatternsOf(source *ResolvedSkillSourceDefinition) ([]string, []strin
 	return source.IncludeNamePatterns, source.IncludePathPatterns
 }
 
-// BuildSyncTargetOptions：同步弹窗的全部 target 候选（全局 + 项目 agent），
-// 并标注落点是目录链接（指向别的受管 target）的条目，让界面禁用并展示。
-func BuildSyncTargetOptions(store *WorkspaceConfigStore) ([]SyncTargetOption, error) {
+// BuildSyncPathOptions：同步弹窗的全部技能路径候选，并标注目录是目录链接
+// （别名路径）的条目，让界面禁用并展示。
+func BuildSyncPathOptions(store *WorkspaceConfigStore) ([]SyncPathOption, error) {
 	config, err := store.Parse()
 	if err != nil {
 		return nil, err
@@ -56,7 +56,7 @@ func BuildSyncTargetOptions(store *WorkspaceConfigStore) ([]SyncTargetOption, er
 	if err != nil {
 		return nil, err
 	}
-	return buildSyncTargetOptionsWithSources(config, sources)
+	return buildSyncPathOptionsWithSources(config, sources)
 }
 
 // skillLinkSource：链接归类用的来源投影。
@@ -86,9 +86,9 @@ func buildSkillLinkSources(store *WorkspaceConfigStore, config *ResolvedManagerC
 	return sources, nil
 }
 
-// buildSyncTargetOptionsWithSources：与 source 根路径解析分离，保证关联
+// buildSyncPathOptionsWithSources：与 source 根路径解析分离，保证关联
 // 分类不会 clone/pull git source。
-func buildSyncTargetOptionsWithSources(config *ResolvedManagerConfig, sources []skillLinkSource) ([]SyncTargetOption, error) {
+func buildSyncPathOptionsWithSources(config *ResolvedManagerConfig, sources []skillLinkSource) ([]SyncPathOption, error) {
 	// 落点的链接状态由寻址层统一提供（是不是链接、内容属于谁、解出的真实
 	// 目录），本地不再自己 canonicalize 一遍。
 	links, err := config.skillDirLinks()
@@ -96,54 +96,43 @@ func buildSyncTargetOptionsWithSources(config *ResolvedManagerConfig, sources []
 		return nil, err
 	}
 
-	options := make([]SyncTargetOption, 0, len(links))
+	options := make([]SyncPathOption, 0, len(links))
 	for _, entry := range links {
-		skillDir := entry.target.SkillDir
-		// 落点是软链接时：能对上受管 target 就给出它的 id（命名归属），对不上
-		// 就把链接解出的真实目录带出去——界面的「内容属谁 / 文件在哪」都靠
-		// 这两个值，不再由前端猜。
-		var skillDirLinkTarget *string
+		// 目录是软链接时：能对上受管技能路径就给出它的条目名（命名归属），
+		// 对不上就把链接解出的真实目录带出去——界面的「内容属谁 / 文件在哪」
+		// 都靠这两个值，不再由前端猜。
+		var dirLinkTarget *string
 		if entry.link.IsLink {
 			displayed := support.DisplayPath(entry.link.LinkTarget)
-			skillDirLinkTarget = &displayed
+			dirLinkTarget = &displayed
 		}
-		// 内容属于链接另一端时，那一批物理链接不该算成本 target 自己的
+		// 内容属于链接另一端时，那一批物理链接不该算成本条目自己的
 		// 安装记录。
 		associations := []SkillLinkAssociation{}
 		if !entry.link.IsAlias() {
-			associations, err = scanTargetSkillLinks(skillDir, sources)
+			associations, err = scanPathSkillLinks(entry.path.Dir, sources)
 			if err != nil {
 				return nil, err
 			}
 		}
-		var projectID *string
-		agentID := string(entry.reference.agentID)
-		if entry.reference.projectID != "" {
-			id := entry.reference.projectID
-			projectID = &id
+		var linkedPathID *string
+		if entry.link.HasLinkedPath {
+			owner := entry.link.LinkedPathID
+			linkedPathID = &owner
 		}
-		id := entry.reference.CompositeID()
-		var linkedTargetID *string
-		if entry.link.HasLinkedTarget {
-			owner := entry.link.LinkedTargetID
-			linkedTargetID = &owner
-		}
-		options = append(options, SyncTargetOption{
-			ID:                 id,
-			ProjectID:          projectID,
-			AgentID:            agentID,
-			Label:              id,
-			SkillDir:           support.DisplayPath(skillDir),
-			LinkedTargetID:     linkedTargetID,
-			SkillDirLinkTarget: skillDirLinkTarget,
-			Links:              associations,
+		options = append(options, SyncPathOption{
+			Name:          entry.name,
+			Dir:           support.DisplayPath(entry.path.Dir),
+			LinkedPathID:  linkedPathID,
+			DirLinkTarget: dirLinkTarget,
+			Links:         associations,
 		})
 	}
 
 	return options, nil
 }
 
-func scanTargetSkillLinks(skillDir string, sources []skillLinkSource) ([]SkillLinkAssociation, error) {
+func scanPathSkillLinks(skillDir string, sources []skillLinkSource) ([]SkillLinkAssociation, error) {
 	links, err := enumerateLinks(skillDir)
 	if err != nil {
 		return nil, err
@@ -265,10 +254,10 @@ func BuildSyncSkillOptions(ctx context.Context, store *WorkspaceConfigStore, sou
 	}, nil
 }
 
-// SyncSourceToTargetsInner：统一同步：发现来源 → 清掉全部 target 上本来源
-// 的旧链接 → 把选中的 skill 按目录链接装进选中的 target。不再读写 config
+// SyncSourceToPathsInner：统一同步：发现来源 → 清掉全部技能路径上本来源
+// 的旧链接 → 把选中的 skill 按目录链接装进选中的技能路径。不再读写 config
 // 里的技能注册表；只操作链接。
-func SyncSourceToTargetsInner(store *WorkspaceConfigStore, input SourceSyncInput) (*SourceSyncResult, error) {
+func SyncSourceToPathsInner(store *WorkspaceConfigStore, input SourceSyncInput) (*SourceSyncResult, error) {
 	config, err := store.Parse()
 	if err != nil {
 		return nil, err
@@ -280,25 +269,25 @@ func SyncSourceToTargetsInner(store *WorkspaceConfigStore, input SourceSyncInput
 		return nil, err
 	}
 
-	conflicts, err := sourceSyncConflicts(config, sourceRoot, selectedSkills, input.TargetIDs)
+	conflicts, err := sourceSyncConflicts(config, sourceRoot, selectedSkills, input.PathIDs)
 	if err != nil {
 		return nil, err
 	}
 	if !input.OverwriteExisting && len(conflicts) > 0 {
 		lines := make([]string, 0, len(conflicts))
 		for _, conflict := range conflicts {
-			lines = append(lines, fmt.Sprintf("%s / %s -> %s", conflict.TargetID, conflict.SkillName, conflict.DestinationPath))
+			lines = append(lines, fmt.Sprintf("%s / %s -> %s", conflict.PathID, conflict.SkillName, conflict.DestinationPath))
 		}
 		return nil, fmt.Errorf("同步会覆盖非本来源路径：\n%s", strings.Join(lines, "\n"))
 	}
 
 	// 2. 参与分发的目标。skip 产出提示而不是静默：正常界面已经把它们标成
 	//    不可勾并说明原因，能走到这里说明是客户端直接调用（或界面过期快照）。
-	resolved, err := resolveIDs(config, input.TargetIDs)
+	resolved, err := resolveIDs(config, input.PathIDs)
 	if err != nil {
 		return nil, err
 	}
-	participating, warnings := participatingTargets(resolved, nil)
+	participating, warnings := participatingPaths(resolved, nil)
 	selectedEntries := toSelectedSkills(selectedSkills)
 
 	// 3. 先清掉本来源在这批目标上的旧链接，再按选中集合装回去；两次操作
@@ -355,7 +344,7 @@ func PreviewSourceSyncConflictsInner(store *WorkspaceConfigStore, input SourceSy
 	if err != nil {
 		return nil, err
 	}
-	return sourceSyncConflicts(config, sourceRoot, selectedSkills, input.TargetIDs)
+	return sourceSyncConflicts(config, sourceRoot, selectedSkills, input.PathIDs)
 }
 
 // syncSelection：同步弹窗确认输入的解释（执行与预演共用）：来源定义 →
@@ -391,40 +380,40 @@ func toSelectedSkills(skills []DiscoveredSkill) []selectedSkill {
 	return selected
 }
 
-// participatingTargets：resolveIDs/managedTargets 结果里真正参与分发的目标。
-// skip 的处置文案（「已跳过」系列，与报错路径同一说法）随行返回，调用方
-// 决定记 warning 还是丢弃（预演/卸载静默）；filter 非空时按所选地址过滤，
-// skip 提示也只覆盖所选目标。判定与呈现的关联只此一份。
-func participatingTargets(resolved []managedTarget, targetIDs *map[string]bool) ([]*managedTarget, []string) {
-	participating := make([]*managedTarget, 0, len(resolved))
+// participatingPaths：resolveIDs/managedSkillPaths 结果里真正参与分发的
+// 路径。skip 的处置文案（「已跳过」系列，与报错路径同一说法）随行返回，
+// 调用方决定记 warning 还是丢弃（预演/卸载静默）；filter 非空时按所选条目
+// 过滤，skip 提示也只覆盖所选路径。判定与呈现的关联只此一份。
+func participatingPaths(resolved []managedPath, pathIDs *map[string]bool) ([]*managedPath, []string) {
+	participating := make([]*managedPath, 0, len(resolved))
 	notes := []string{}
 	for i := range resolved {
-		target := &resolved[i]
-		if targetIDs != nil && !(*targetIDs)[target.id] {
+		path := &resolved[i]
+		if pathIDs != nil && !(*pathIDs)[path.id] {
 			continue
 		}
-		if target.skip != nil {
-			switch *target.skip {
+		if path.skip != nil {
+			switch *path.skip {
 			// 与报错路径同一说法，只在前面加「已跳过」这个处置结果。
 			case SkipMissing:
-				notes = append(notes, fmt.Sprintf("%s，已跳过。", targetUnavailable(target.id)))
+				notes = append(notes, fmt.Sprintf("%s，已跳过。", pathUnavailable(path.id)))
 			case SkipLinkedDir:
-				notes = append(notes, fmt.Sprintf("%s 的 skills 目录是软链接，内容由链接另一端负责，已跳过。", target.id))
+				notes = append(notes, fmt.Sprintf("%s 的目录是软链接，内容由链接另一端负责，已跳过。", path.id))
 			}
 			continue
 		}
-		participating = append(participating, target)
+		participating = append(participating, path)
 	}
 	return participating, notes
 }
 
-func sourceSyncConflicts(config *ResolvedManagerConfig, sourceRoot string, selectedSkills []DiscoveredSkill, targetIDs []string) ([]SourceSyncConflict, error) {
+func sourceSyncConflicts(config *ResolvedManagerConfig, sourceRoot string, selectedSkills []DiscoveredSkill, pathNames []string) ([]SourceSyncConflict, error) {
 	// 与同步共用同一套 skip 判定与落点分类：预演会报的，同步才会覆盖。
-	resolved, err := resolveIDs(config, targetIDs)
+	resolved, err := resolveIDs(config, pathNames)
 	if err != nil {
 		return nil, err
 	}
-	participating, _ := participatingTargets(resolved, nil)
+	participating, _ := participatingPaths(resolved, nil)
 	selected := toSelectedSkills(selectedSkills)
 
 	installConflicts, err := newSkillInstall(sourceRoot).conflicts(participating, selected)
@@ -435,7 +424,7 @@ func sourceSyncConflicts(config *ResolvedManagerConfig, sourceRoot string, selec
 	for _, conflict := range installConflicts {
 		conflicts = append(conflicts, SourceSyncConflict{
 			SkillName:       conflict.skillName,
-			TargetID:        AgentTargetID(conflict.targetID),
+			PathID:          conflict.pathID,
 			SourcePath:      support.DisplayPath(conflict.sourcePath),
 			DestinationPath: support.DisplayPath(conflict.destinationPath),
 			ExistingKind:    conflict.existingKind,
@@ -497,18 +486,18 @@ func syncSkillOptionToDiscovered(sourceRoot string, skill *SyncSkillOption) (Dis
 	}, nil
 }
 
-// RemoveSourceSyncInner：remove sync 动作：只清该来源在被选 target 上的
-// 足迹，其他 target 不动。
-func RemoveSourceSyncInner(store *WorkspaceConfigStore, sourceID string, targetIDs []string) (*SourceSyncResult, error) {
+// RemoveSourceSyncInner：remove sync 动作：只清该来源在被选技能路径上的
+// 足迹，其他路径不动。
+func RemoveSourceSyncInner(store *WorkspaceConfigStore, sourceID string, pathNames []string) (*SourceSyncResult, error) {
 	config, err := store.Parse()
 	if err != nil {
 		return nil, err
 	}
-	targetIDFilter := map[string]bool{}
-	for _, id := range targetIDs {
-		targetIDFilter[id] = true
+	pathFilter := map[string]bool{}
+	for _, name := range pathNames {
+		pathFilter[name] = true
 	}
-	removed, err := removeSourceSymlinksFromTargets(store, config, sourceID, &targetIDFilter)
+	removed, err := removeSourceSymlinksFromPaths(store, config, sourceID, &pathFilter)
 	if err != nil {
 		return nil, err
 	}
@@ -950,13 +939,13 @@ func importGitSource(store *WorkspaceConfigStore, rawConfig *RawManagerConfig, s
 // Only links are touched — real dirs/files are user-managed.
 // ---------------------------------------------------------------------------
 
-// removeSourceSymlinksFromTargets：删掉各 target 上指向 `source_id` 技能的
-// 目录链接并逐条收集。targetIDs = nil 表示全部 target；否则只清列出的。
-func removeSourceSymlinksFromTargets(
+// removeSourceSymlinksFromPaths：删掉各技能路径上指向 `source_id` 技能的
+// 目录链接并逐条收集。pathNames = nil 表示全部路径；否则只清列出的。
+func removeSourceSymlinksFromPaths(
 	store *WorkspaceConfigStore,
 	config *ResolvedManagerConfig,
 	sourceID string,
-	targetIDs *map[string]bool,
+	pathNames *map[string]bool,
 ) ([]SkillSyncItem, error) {
 	sourceDefinition, err := sourceDefinitionFromConfig(config, sourceID)
 	if err != nil {
@@ -966,17 +955,17 @@ func removeSourceSymlinksFromTargets(
 	if err != nil {
 		return nil, err
 	}
-	return removeSourceSymlinksWithRoot(config, sourceRoot, targetIDs)
+	return removeSourceSymlinksWithRoot(config, sourceRoot, pathNames)
 }
 
 // removeSourceSymlinksWithRoot：无 store 的卸载入口：来源根已知时直接清理
 // （测试与已解析配置的调用方用）。
-func removeSourceSymlinksWithRoot(config *ResolvedManagerConfig, sourceRoot string, targetIDs *map[string]bool) ([]SkillSyncItem, error) {
-	targets, err := managedTargets(config)
+func removeSourceSymlinksWithRoot(config *ResolvedManagerConfig, sourceRoot string, pathNames *map[string]bool) ([]SkillSyncItem, error) {
+	paths, err := managedSkillPaths(config)
 	if err != nil {
 		return nil, err
 	}
-	participating, _ := participatingTargets(targets, targetIDs)
+	participating, _ := participatingPaths(paths, pathNames)
 
 	items, err := newSkillInstall(sourceRoot).removeInstalled(participating)
 	if err != nil {
@@ -989,29 +978,29 @@ func removeSourceSymlinksWithRoot(config *ResolvedManagerConfig, sourceRoot stri
 	return removed, nil
 }
 
-// RemoveTargetSkillLinkInner：移除单个 target 上的目录链接，用于同步弹窗里
+// RemovePathSkillLinkInner：移除单条技能路径上的目录链接，用于同步弹窗里
 // 逐条清理非受管控条目。只删链接本身：先确认目标确实是目录链接，再删，
 // 真实目录/文件一律拒绝。
-func RemoveTargetSkillLinkInner(store *WorkspaceConfigStore, targetID string, destinationPath string) (*SkillSyncItem, error) {
+func RemovePathSkillLinkInner(store *WorkspaceConfigStore, pathName string, destinationPath string) (*SkillSyncItem, error) {
 	config, err := store.Parse()
 	if err != nil {
 		return nil, err
 	}
-	target := config.targetByID(targetID)
-	if target == nil {
-		return nil, targetUnavailable(targetID)
+	path := config.skillPathByName(pathName)
+	if path == nil {
+		return nil, pathUnavailable(pathName)
 	}
 
 	// 链接归属校验与删除都在安装面：真实目录/文件一律拒绝。
-	removed, err := newSkillInstall(target.SkillDir).removeAt(targetID, target.SkillDir, destinationPath)
+	removed, err := newSkillInstall(path.Dir).removeAt(pathName, path.Dir, destinationPath)
 	if err != nil {
 		return nil, err
 	}
 
-	// 落点是软链接时，删掉的是链接另一端目录里的条目，而这条记录挂着本
-	// target 的名字。穿链接本身是正常语义，但称呼必须说清，否则「删了自己的」
+	// 目录是软链接时，删掉的是链接另一端目录里的条目，而这条记录挂着本
+	// 路径的名字。穿链接本身是正常语义，但称呼必须说清，否则「删了自己的」
 	// 这个印象是错的。
-	linked, err := readSkillDirLink(target.SkillDir)
+	linked, err := readSkillDirLink(path.Dir)
 	if err != nil {
 		return nil, err
 	}
@@ -1117,12 +1106,12 @@ func deleteSkillSourceEntries(
 		return fmt.Errorf("未找到来源：%s", sourceID)
 	}
 
-	// Remove softlinks for this source's skills from every target.
+	// Remove softlinks for this source's skills from every skill path.
 	resolvedConfig, err := parseManagerConfig(rawContent, configPath, env)
 	if err != nil {
 		return err
 	}
-	if _, err := removeSourceSymlinksFromTargets(store, resolvedConfig, sourceID, nil); err != nil {
+	if _, err := removeSourceSymlinksFromPaths(store, resolvedConfig, sourceID, nil); err != nil {
 		return err
 	}
 

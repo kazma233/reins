@@ -32,12 +32,10 @@ func stdioServer(name string) *ResolvedMcpConfig {
 	}
 }
 
-func mcpFormatsTarget(id string, configPath string, prefix string, configType agents.McpConfigType) *ResolvedTargetConfig {
-	return &ResolvedTargetConfig{
-		IsProject:       false,
-		ID:              AgentTargetID(id),
-		SkillDir:        "/tmp/reins-mcp-formats-skills",
-		ConfigPath:      strPtr(configPath),
+func mcpFormatsPath(name string, configPath string, prefix string, configType agents.McpConfigType) *ResolvedMcpPath {
+	return &ResolvedMcpPath{
+		Name:            name,
+		ConfigPath:      configPath,
 		MCPConfigPrefix: prefix,
 		MCPConfigType:   configType,
 	}
@@ -48,7 +46,7 @@ func TestCommonJSONRoundtripPreservesUnrelatedConfig(t *testing.T) {
 	configPath := filepath.Join(root, "mcp.json")
 	original := `{"topLevel": {"keep": true}, "mcpServers": {"other": {"type": "stdio", "command": "keep"}}}`
 	writeFileT(t, configPath, original)
-	target := mcpFormatsTarget("claude", configPath, "mcpServers", agents.McpConfigCommon)
+	target := mcpFormatsPath("claude", configPath, "mcpServers", agents.McpConfigCommon)
 	writer := mcpFormatWriterFor(agents.McpConfigCommon)
 
 	formatTag, content, err := writer.previewEntry(configPath, stdioServer("probe"))
@@ -131,7 +129,7 @@ func TestCommonTOMLRoundtripUsesSecondFloats(t *testing.T) {
 	configPath := filepath.Join(root, "config.toml")
 	original := "model = 'unchanged'\n\n[mcp_servers.other]\ncommand = 'keep'\n"
 	writeFileT(t, configPath, original)
-	target := mcpFormatsTarget("codex", configPath, "mcp_servers", agents.McpConfigCommon)
+	target := mcpFormatsPath("codex", configPath, "mcp_servers", agents.McpConfigCommon)
 	writer := mcpFormatWriterFor(agents.McpConfigCommon)
 
 	formatTag, content, err := writer.previewEntry(configPath, stdioServer("probe"))
@@ -189,7 +187,7 @@ func TestGrokbuildTOMLRoundtripAndJSONRejectedVerbatim(t *testing.T) {
 	configPath := filepath.Join(root, "config.toml")
 	original := "[mcp_servers.other]\ncommand = 'keep'\n"
 	writeFileT(t, configPath, original)
-	target := mcpFormatsTarget("grokbuild", configPath, "mcp_servers", agents.McpConfigGrokBuild)
+	target := mcpFormatsPath("grokbuild", configPath, "mcp_servers", agents.McpConfigGrokBuild)
 	writer := mcpFormatWriterFor(agents.McpConfigGrokBuild)
 
 	if err := writer.applyEntry(target, configPath, stdioServer("probe")); err != nil {
@@ -240,7 +238,7 @@ func TestOpencodeJSONRoundtripAndTOMLRejectedVerbatim(t *testing.T) {
 	configPath := filepath.Join(root, "opencode.json")
 	original := `{"theme": "dark"}`
 	writeFileT(t, configPath, original)
-	target := mcpFormatsTarget("opencode", configPath, "mcp.servers", agents.McpConfigOpenCode)
+	target := mcpFormatsPath("opencode", configPath, "mcp.servers", agents.McpConfigOpenCode)
 	writer := mcpFormatWriterFor(agents.McpConfigOpenCode)
 
 	if err := writer.applyEntry(target, configPath, stdioServer("probe")); err != nil {
@@ -292,7 +290,7 @@ func TestDshPatchRoundtripClaimsAndRestoresOps(t *testing.T) {
 	root := testsupport.TestDir(t, "mcp-fmt-dsh")
 	configPath := filepath.Join(root, "cordis.patch.yml")
 	writeFileT(t, configPath, "- remove: [user-owned-node]\n")
-	target := mcpFormatsTarget("dsh", configPath, "", agents.McpConfigDsh)
+	target := mcpFormatsPath("dsh", configPath, "", agents.McpConfigDsh)
 	writer := mcpFormatWriterFor(agents.McpConfigDsh)
 
 	formatTag, content, err := writer.previewEntry(configPath, stdioServer("probe"))
@@ -365,7 +363,7 @@ func TestDshPatchRoundtripClaimsAndRestoresOps(t *testing.T) {
 func TestDshPatchRemoteEntryUsesStreamableHTTPShape(t *testing.T) {
 	root := testsupport.TestDir(t, "mcp-fmt-dsh-remote")
 	configPath := filepath.Join(root, "cordis.patch.yml")
-	target := mcpFormatsTarget("dsh", configPath, "", agents.McpConfigDsh)
+	target := mcpFormatsPath("dsh", configPath, "", agents.McpConfigDsh)
 	writer := mcpFormatWriterFor(agents.McpConfigDsh)
 	server := &ResolvedMcpConfig{
 		Name:      "probe",
@@ -471,7 +469,7 @@ func TestDetectMCPFileFormatRejectsUnrecognizedExtensions(t *testing.T) {
 	writer := mcpFormatWriterFor(agents.McpConfigCommon)
 
 	// 内容完全可解析、后缀不可识别：报错，不静默猜格式。
-	for _, name := range []string{"mcp-conf", "mcp.json5", "mcp.yml", "mcp"} {
+	for _, name := range []string{"mcp-conf", "mcp.json5", "mcp"} {
 		configPath := filepath.Join(root, name)
 		writeFileT(t, configPath, `{"mcpServers": {}}`)
 		wantErr := "无法从文件名推断 MCP 配置格式"
@@ -481,7 +479,7 @@ func TestDetectMCPFileFormatRejectsUnrecognizedExtensions(t *testing.T) {
 		if _, _, err := writer.previewEntry(configPath, stdioServer("probe")); err == nil || !strings.Contains(err.Error(), wantErr) {
 			t.Fatalf("preview(%s) 应报「无法从文件名推断」：%v", name, err)
 		}
-		if err := writer.applyEntry(mcpFormatsTarget("claude", configPath, "mcpServers", agents.McpConfigCommon), configPath, stdioServer("probe")); err == nil || !strings.Contains(err.Error(), wantErr) {
+		if err := writer.applyEntry(mcpFormatsPath("claude", configPath, "mcpServers", agents.McpConfigCommon), configPath, stdioServer("probe")); err == nil || !strings.Contains(err.Error(), wantErr) {
 			t.Fatalf("apply(%s) 应报「无法从文件名推断」：%v", name, err)
 		}
 		// 报错路径不得改写文件。
@@ -499,6 +497,9 @@ func TestDetectMCPFileFormatMapsExtensions(t *testing.T) {
 	}
 	if format, err := detectMCPFileFormat("/tmp/x/config.TOML"); err != nil || format != mcpFormatTOML {
 		t.Fatalf("TOML：(%v, %v)", format, err)
+	}
+	if format, err := detectMCPFileFormat("/tmp/x/config.YML"); err != nil || format != mcpFormatYAML {
+		t.Fatalf("YAML：(%v, %v)", format, err)
 	}
 	if format, err := detectMCPFileFormat("/tmp/x/no-extension"); err == nil {
 		t.Fatalf("无后缀应报错：(%v, %v)", format, err)

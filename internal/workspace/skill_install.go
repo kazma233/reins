@@ -17,64 +17,64 @@ import (
 	"reins/internal/support"
 )
 
-// managedTarget：一个参与分发决策的 target。
-type managedTarget struct {
+// managedPath：一个参与分发决策的技能路径。
+type managedPath struct {
 	id string
-	// target：目标不存在（SkipMissing）时没有配置可指，调用方必须先看 skip。
-	target *ResolvedTargetConfig
+	// path：条目不存在（SkipMissing）时没有配置可指，调用方必须先看 skip。
+	path *ResolvedSkillPath
 	// skip：非 nil = 不参与安装与清理；枚举（UI 只读展示）仍需要它。
-	skip *TargetSkip
+	skip *PathSkip
 }
 
-// skillDir：只在 skip == nil（目标存在且参与分发）时调用。
-func (m *managedTarget) skillDir() string {
-	if m.target == nil {
-		panic("跳过的目标不参与分发，调用方必须先看 skip")
+// dir：只在 skip == nil（条目存在且参与分发）时调用。
+func (m *managedPath) dir() string {
+	if m.path == nil {
+		panic("跳过的技能路径不参与分发，调用方必须先看 skip")
 	}
-	return m.target.SkillDir
+	return m.path.Dir
 }
 
-// resolveIDs：解析一批 target id（含项目复合 id），保持输入顺序：不存在的
-// id 也占一位（SkipMissing），由调用方决定是警告还是忽略。同步与冲突预演
-// 共用，才能保证「预演会报的问题」与「同步会跳过的目标」是同一批。
-func resolveIDs(config *ResolvedManagerConfig, targetIDs []string) ([]managedTarget, error) {
-	targets := make([]managedTarget, 0, len(targetIDs))
-	for _, targetID := range targetIDs {
-		reference := parseTargetID(targetID)
-		skip, err := config.skipReason(reference)
+// resolveIDs：解析一批技能路径名，保持输入顺序：不存在的名字也占一位
+// （SkipMissing），由调用方决定是警告还是忽略。同步与冲突预演共用，才能
+// 保证「预演会报的问题」与「同步会跳过的路径」是同一批。
+func resolveIDs(config *ResolvedManagerConfig, pathNames []string) ([]managedPath, error) {
+	paths := make([]managedPath, 0, len(pathNames))
+	for _, name := range pathNames {
+		skip, err := config.skipReason(name)
 		if err != nil {
 			return nil, err
 		}
-		targets = append(targets, managedTarget{
-			id:     targetID,
-			target: config.target(reference),
-			skip:   skip,
+		paths = append(paths, managedPath{
+			id:   name,
+			path: config.skillPathByName(name),
+			skip: skip,
 		})
 	}
-	return targets, nil
+	return paths, nil
 }
 
-// managedTargets：配置里全部全局 target + 项目级 target；skip 已判定，
-// 调用方只决定呈现。
-func managedTargets(config *ResolvedManagerConfig) ([]managedTarget, error) {
-	refs, err := config.managedRefs()
+// managedSkillPaths：配置里全部技能路径；skip 已判定（目录整层是链接的
+// 别名路径统一不参与分发），调用方只决定呈现。
+func managedSkillPaths(config *ResolvedManagerConfig) ([]managedPath, error) {
+	entries, err := config.skillDirLinks()
 	if err != nil {
 		return nil, err
 	}
-	targets := make([]managedTarget, 0, len(refs))
-	for _, entry := range refs {
-		targets = append(targets, managedTarget{
-			id:     entry.reference.CompositeID(),
-			target: entry.target,
-			skip:   entry.skip,
-		})
+	paths := make([]managedPath, 0, len(entries))
+	for _, entry := range entries {
+		var skip *PathSkip
+		if entry.link.IsAlias() {
+			linked := SkipLinkedDir
+			skip = &linked
+		}
+		paths = append(paths, managedPath{id: entry.name, path: entry.path, skip: skip})
 	}
-	return targets, nil
+	return paths, nil
 }
 
-// destinationOf：一个 skill 在 target 里的落点：skills 目录 + skill 名。
-func destinationOf(target *managedTarget, skillName string) string {
-	return joinPath(target.skillDir(), skillName)
+// destinationOf：一个 skill 在技能路径里的落点：目录 + skill 名。
+func destinationOf(path *managedPath, skillName string) string {
+	return joinPath(path.dir(), skillName)
 }
 
 // selectedSkill：本次分发选中的 skill：展示名 + 来源内的相对路径。
@@ -144,7 +144,7 @@ func splitPathComponentAware(path string) []string {
 
 // conflicts：预演：哪些落点会被非本来源路径覆盖。只有会真正阻断同步的
 // 条目才产出。
-func (s *skillInstall) conflicts(targets []*managedTarget, selected []selectedSkill) ([]installConflict, error) {
+func (s *skillInstall) conflicts(targets []*managedPath, selected []selectedSkill) ([]installConflict, error) {
 	var conflicts []installConflict
 	for _, target := range targets {
 		for _, skill := range selected {
@@ -162,7 +162,7 @@ func (s *skillInstall) conflicts(targets []*managedTarget, selected []selectedSk
 				continue
 			}
 			conflicts = append(conflicts, installConflict{
-				targetID:        target.id,
+				pathID:          target.id,
 				skillName:       skill.name,
 				sourcePath:      sourceDir,
 				destinationPath: destination,
@@ -176,7 +176,7 @@ func (s *skillInstall) conflicts(targets []*managedTarget, selected []selectedSk
 
 // apply：安装：把选中的 skill 装进给定 target。已指向本来源的落点记为
 // unchanged，由调用方决定提示；覆盖非本来源路径是调用方的明确选择。
-func (s *skillInstall) apply(targets []*managedTarget, selected []selectedSkill) ([]installItem, error) {
+func (s *skillInstall) apply(targets []*managedPath, selected []selectedSkill) ([]installItem, error) {
 	items := make([]installItem, 0)
 	for _, target := range targets {
 		for _, skill := range selected {
@@ -216,10 +216,10 @@ func (s *skillInstall) apply(targets []*managedTarget, selected []selectedSkill)
 
 // removeInstalled：卸载：删掉所有指进本来源的链接（targets 只含参与分发的
 // 目标）。
-func (s *skillInstall) removeInstalled(targets []*managedTarget) ([]installItem, error) {
+func (s *skillInstall) removeInstalled(targets []*managedPath) ([]installItem, error) {
 	removed := make([]installItem, 0)
 	for _, target := range targets {
-		links, err := enumerateLinks(target.skillDir())
+		links, err := enumerateLinks(target.dir())
 		if err != nil {
 			return nil, err
 		}
@@ -238,7 +238,7 @@ func (s *skillInstall) removeInstalled(targets []*managedTarget) ([]installItem,
 
 // removeAt：单个落点的卸载（同步弹窗逐条清理）：先确认它属于该 target 的
 // 目录，再确认确实是链接；真实目录/文件一律拒绝。
-func (s *skillInstall) removeAt(targetID string, skillDir string, destination string) (installItem, error) {
+func (s *skillInstall) removeAt(pathID string, skillDir string, destination string) (installItem, error) {
 	// 只规范化父目录：对链接自身 canonicalize 会把链接解析到目标路径，
 	// 无法再判断它位于哪个 skill_dir 下。
 	parent := filepath.Dir(destination)
@@ -257,7 +257,7 @@ func (s *skillInstall) removeAt(targetID string, skillDir string, destination st
 		return installItem{}, err
 	}
 
-	return removedItem(targetID, destination, *resolved), nil
+	return removedItem(pathID, destination, *resolved), nil
 }
 
 func (s *skillInstall) linksIntoSource(resolved string) bool {
@@ -404,14 +404,14 @@ func conflictOf(state destinationState) (string, string, bool) {
 // SourceSyncConflict）在调用方转换，这里不承担展示格式。
 type installItem struct {
 	skillName       string
-	targetID        AgentTargetID
+	pathID          string
 	sourcePath      string
 	destinationPath string
 	action          string
 	detail          *string
 }
 
-func (s *skillInstall) installedItem(skill selectedSkill, targetID string, sourceDir string, destination string, state destinationState) installItem {
+func (s *skillInstall) installedItem(skill selectedSkill, pathID string, sourceDir string, destination string, state destinationState) installItem {
 	action, detail := "create", (*string)(nil)
 	switch state.kind {
 	case stateRealDirectory:
@@ -426,7 +426,7 @@ func (s *skillInstall) installedItem(skill selectedSkill, targetID string, sourc
 	}
 	return installItem{
 		skillName:       skill.name,
-		targetID:        AgentTargetID(targetID),
+		pathID:          pathID,
 		sourcePath:      support.DisplayPath(sourceDir),
 		destinationPath: support.DisplayPath(destination),
 		action:          action,
@@ -434,11 +434,11 @@ func (s *skillInstall) installedItem(skill selectedSkill, targetID string, sourc
 	}
 }
 
-func (s *skillInstall) unchangedItem(skill selectedSkill, targetID string, sourceDir string, destination string, state destinationState) installItem {
+func (s *skillInstall) unchangedItem(skill selectedSkill, pathID string, sourceDir string, destination string, state destinationState) installItem {
 	detail := fmt.Sprintf("%s已存在：%s", state.kindLabel, support.DisplayPath(destination))
 	return installItem{
 		skillName:       skill.name,
-		targetID:        AgentTargetID(targetID),
+		pathID:          pathID,
 		sourcePath:      support.DisplayPath(sourceDir),
 		destinationPath: support.DisplayPath(destination),
 		action:          "unchanged",
@@ -446,14 +446,14 @@ func (s *skillInstall) unchangedItem(skill selectedSkill, targetID string, sourc
 	}
 }
 
-func removedItem(targetID string, destination string, resolved string) installItem {
+func removedItem(pathID string, destination string, resolved string) installItem {
 	skillName := filepath.Base(destination)
 	if skillName == "" || skillName == "." || skillName == string(filepath.Separator) {
 		skillName = "skill"
 	}
 	return installItem{
 		skillName:       skillName,
-		targetID:        AgentTargetID(targetID),
+		pathID:          pathID,
 		sourcePath:      support.DisplayPath(resolved),
 		destinationPath: support.DisplayPath(destination),
 		action:          "remove",
@@ -469,7 +469,7 @@ func (item installItem) ToSyncItem() SkillSyncItem {
 	}
 	return SkillSyncItem{
 		SkillName:       item.skillName,
-		TargetID:        item.targetID,
+		PathID:          item.pathID,
 		SourcePath:      item.sourcePath,
 		DestinationPath: item.destinationPath,
 		Action:          item.action,
@@ -480,7 +480,7 @@ func (item installItem) ToSyncItem() SkillSyncItem {
 // installConflict：冲突条目的事实形态。
 type installConflict struct {
 	skillName       string
-	targetID        string
+	pathID          string
 	sourcePath      string
 	destinationPath string
 	existingKind    string

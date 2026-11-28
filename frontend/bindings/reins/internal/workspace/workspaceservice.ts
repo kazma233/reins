@@ -16,18 +16,25 @@ import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wails
 import * as $models from "./models.js";
 
 /**
- * ApplyMCPToTarget 对齐 apply_mcp_to_target。
- */
-export function ApplyMCPToTarget(serverName: string, targetID: string): $CancellablePromise<$models.McpTargetMutationResult | null> {
-    return $Call.ByID(1649950838, serverName, targetID);
-}
-
-/**
  * CancelSkillSourceFetch 对齐 cancel_skill_source_fetch：无在途拉取时是
  * 空操作，无返回值（Wails 侧 CancellablePromise<void>）。
  */
 export function CancelSkillSourceFetch(): $CancellablePromise<void> {
     return $Call.ByID(3842156528);
+}
+
+/**
+ * CreateMcpPath 对齐 create_mcp_path。
+ */
+export function CreateMcpPath(name: string, configPath: string, configType: string, configPrefix: string): $CancellablePromise<$models.WorkspacePathMutationResult | null> {
+    return $Call.ByID(3322480937, name, configPath, configType, configPrefix);
+}
+
+/**
+ * CreateSkillPath 对齐 create_skill_path。
+ */
+export function CreateSkillPath(name: string, dir: string): $CancellablePromise<$models.WorkspacePathMutationResult | null> {
+    return $Call.ByID(3540475072, name, dir);
 }
 
 /**
@@ -40,17 +47,18 @@ export function CreateWorkspaceMCP(name: string, transport: string, homepage: st
 }
 
 /**
- * CreateWorkspaceProject 对齐 create_workspace_project。
+ * DeleteMcpPath 对齐 delete_mcp_path；cleanup=true 时一并移除 Reins 写入的
+ * 条目。
  */
-export function CreateWorkspaceProject(input: $models.ProjectMutationInput): $CancellablePromise<$models.WorkspaceTargetMutationResult | null> {
-    return $Call.ByID(3584527900, input);
+export function DeleteMcpPath(name: string, cleanup: boolean): $CancellablePromise<$models.WorkspacePathMutationResult | null> {
+    return $Call.ByID(754196740, name, cleanup);
 }
 
 /**
- * CreateWorkspaceTarget 对齐 create_workspace_target。
+ * DeleteSkillPath 对齐 delete_skill_path；cleanup=true 时一并卸载受管链接。
  */
-export function CreateWorkspaceTarget(targetID: string, skillDir: string, configPath: string | null): $CancellablePromise<$models.WorkspaceTargetMutationResult | null> {
-    return $Call.ByID(2744911042, targetID, skillDir, configPath);
+export function DeleteSkillPath(name: string, cleanup: boolean): $CancellablePromise<$models.WorkspacePathMutationResult | null> {
+    return $Call.ByID(861865245, name, cleanup);
 }
 
 /**
@@ -75,20 +83,6 @@ export function DeleteWorkspaceMCP(serverName: string): $CancellablePromise<$mod
 }
 
 /**
- * DeleteWorkspaceProject 对齐 delete_workspace_project。
- */
-export function DeleteWorkspaceProject(projectID: string): $CancellablePromise<$models.WorkspaceTargetMutationResult | null> {
-    return $Call.ByID(1975092007, projectID);
-}
-
-/**
- * DeleteWorkspaceTarget 对齐 delete_workspace_target。
- */
-export function DeleteWorkspaceTarget(targetID: string): $CancellablePromise<$models.WorkspaceTargetMutationResult | null> {
-    return $Call.ByID(3764806247, targetID);
-}
-
-/**
  * DiscoverGitSkills 对齐 discover_git_skills（clone/pull 到持久缓存再扫描）。
  */
 export function DiscoverGitSkills(repo: string, reference: string | null): $CancellablePromise<$models.SkillDiscoveryResultView | null> {
@@ -110,25 +104,39 @@ export function FilterDiscoveredSkills(discoveryID: string, includeNamePatterns:
 }
 
 /**
+ * GetMcpFormatInfos 对齐 get_mcp_format_infos。
+ */
+export function GetMcpFormatInfos(): $CancellablePromise<$models.McpFormatInfo[] | null> {
+    return $Call.ByID(3959734846);
+}
+
+/**
+ * GetMcpPathPresets 对齐 get_mcp_path_presets。
+ */
+export function GetMcpPathPresets(): $CancellablePromise<$models.McpPathPreset[] | null> {
+    return $Call.ByID(552514339);
+}
+
+/**
+ * GetSkillPathPresets 对齐 get_skill_path_presets。
+ */
+export function GetSkillPathPresets(): $CancellablePromise<$models.SkillPathPreset[] | null> {
+    return $Call.ByID(4071578028);
+}
+
+/**
+ * GetSyncPathOptions 对齐 get_sync_path_options。
+ */
+export function GetSyncPathOptions(): $CancellablePromise<$models.SyncPathOption[] | null> {
+    return $Call.ByID(1523734472);
+}
+
+/**
  * GetSyncSkillOptions 对齐 get_sync_skill_options：进入取数前登记取消槽，
  * 与 Rust 命令层的 fetch_cancel.begin() 同位。
  */
 export function GetSyncSkillOptions(sourceID: string): $CancellablePromise<$models.SyncSkillOptionsResult | null> {
     return $Call.ByID(4043305800, sourceID);
-}
-
-/**
- * GetSyncTargetOptions 对齐 get_sync_target_options。
- */
-export function GetSyncTargetOptions(): $CancellablePromise<$models.SyncTargetOption[] | null> {
-    return $Call.ByID(4159767846);
-}
-
-/**
- * GetTargetPresets 对齐 get_target_presets。
- */
-export function GetTargetPresets(): $CancellablePromise<$models.TargetPreset[] | null> {
-    return $Call.ByID(3277735129);
 }
 
 /**
@@ -153,10 +161,26 @@ export function ImportDiscoveredSkills(discoveryID: string, description: string 
 }
 
 /**
- * PreviewMCPTarget 对齐 preview_mcp_target。
+ * PreviewMcpPathCleanup 对齐 preview_mcp_path_cleanup。
  */
-export function PreviewMCPTarget(serverName: string, targetID: string): $CancellablePromise<$models.McpTargetPreviewResult | null> {
-    return $Call.ByID(2636891299, serverName, targetID);
+export function PreviewMcpPathCleanup(name: string): $CancellablePromise<$models.McpPathCleanupPreview | null> {
+    return $Call.ByID(485315783, name);
+}
+
+/**
+ * PreviewMcpSync：聚合预演 MCP 矩阵同步（2026-11-28 新增，无 Rust 对应命令；
+ * 逐路径 apply/remove/preview 命令已随矩阵同步删除，见决策记录
+ * 2026-11-28-mcp-matrix-sync.md 第 5 条）。
+ */
+export function PreviewMcpSync(input: $models.McpSyncInput): $CancellablePromise<$models.McpSyncPreview | null> {
+    return $Call.ByID(3829074009, input);
+}
+
+/**
+ * PreviewSkillPathCleanup 对齐 preview_skill_path_cleanup。
+ */
+export function PreviewSkillPathCleanup(name: string): $CancellablePromise<$models.SkillPathCleanupPreview | null> {
+    return $Call.ByID(2855569876, name);
 }
 
 /**
@@ -175,24 +199,17 @@ export function RefreshGitSkillSource(sourceID: string): $CancellablePromise<$mo
 }
 
 /**
- * RemoveMCPFromTarget 对齐 remove_mcp_from_target。
+ * RemoveSkillPathLink 对齐 remove_skill_path_link。
  */
-export function RemoveMCPFromTarget(serverName: string, targetID: string): $CancellablePromise<$models.McpTargetMutationResult | null> {
-    return $Call.ByID(3968322527, serverName, targetID);
+export function RemoveSkillPathLink(pathName: string, destinationPath: string): $CancellablePromise<$models.SkillSyncItem | null> {
+    return $Call.ByID(3063112128, pathName, destinationPath);
 }
 
 /**
  * RemoveSourceSync 对齐 remove_source_sync。
  */
-export function RemoveSourceSync(sourceID: string, targetIDs: string[] | null): $CancellablePromise<$models.SourceSyncResult | null> {
-    return $Call.ByID(362363588, sourceID, targetIDs);
-}
-
-/**
- * RemoveTargetSkillLink 对齐 remove_target_skill_link。
- */
-export function RemoveTargetSkillLink(targetID: string, destinationPath: string): $CancellablePromise<$models.SkillSyncItem | null> {
-    return $Call.ByID(4112322132, targetID, destinationPath);
+export function RemoveSourceSync(sourceID: string, pathNames: string[] | null): $CancellablePromise<$models.SourceSyncResult | null> {
+    return $Call.ByID(362363588, sourceID, pathNames);
 }
 
 /**
@@ -203,10 +220,10 @@ export function SelectLocalSkillSourceDirectory(sourcePath: string | null): $Can
 }
 
 /**
- * SelectProjectPath 对齐 select_project_path。
+ * SelectMcpPathConfigFile 对齐 select_mcp_path_config_file。
  */
-export function SelectProjectPath(projectPath: string | null): $CancellablePromise<$models.WorkspaceSelection | null> {
-    return $Call.ByID(1551389540, projectPath);
+export function SelectMcpPathConfigFile(currentPath: string | null): $CancellablePromise<$models.WorkspaceSelection | null> {
+    return $Call.ByID(3838128585, currentPath);
 }
 
 /**
@@ -217,24 +234,38 @@ export function SelectSkillBatchImportFile(): $CancellablePromise<$models.SkillB
 }
 
 /**
- * SelectTargetMCPConfigFile 对齐 select_target_mcp_config_file。
+ * SelectSkillPathDirectory 对齐 select_skill_path_directory。
  */
-export function SelectTargetMCPConfigFile(currentPath: string | null): $CancellablePromise<$models.WorkspaceSelection | null> {
-    return $Call.ByID(4155211037, currentPath);
+export function SelectSkillPathDirectory(currentPath: string | null): $CancellablePromise<$models.WorkspaceSelection | null> {
+    return $Call.ByID(1010651791, currentPath);
 }
 
 /**
- * SelectTargetSkillDirectory 对齐 select_target_skill_directory。
+ * SyncMcpsToPaths：矩阵同步（2026-11-28 新增，无 Rust 对应命令）。
  */
-export function SelectTargetSkillDirectory(currentPath: string | null): $CancellablePromise<$models.WorkspaceSelection | null> {
-    return $Call.ByID(1791134131, currentPath);
+export function SyncMcpsToPaths(input: $models.McpSyncInput): $CancellablePromise<$models.McpSyncResult | null> {
+    return $Call.ByID(1587928647, input);
 }
 
 /**
- * SyncSourceToTargets 对齐 sync_source_to_targets。
+ * SyncSourceToPaths 对齐 sync_source_to_paths。
  */
-export function SyncSourceToTargets(input: $models.SourceSyncInput): $CancellablePromise<$models.SourceSyncResult | null> {
-    return $Call.ByID(4087850529, input);
+export function SyncSourceToPaths(input: $models.SourceSyncInput): $CancellablePromise<$models.SourceSyncResult | null> {
+    return $Call.ByID(2448235231, input);
+}
+
+/**
+ * UpdateMcpPath 对齐 update_mcp_path：config_type 保留存量值（客户端不传）。
+ */
+export function UpdateMcpPath(currentName: string, name: string, configPath: string, configPrefix: string): $CancellablePromise<$models.WorkspacePathMutationResult | null> {
+    return $Call.ByID(4240775658, currentName, name, configPath, configPrefix);
+}
+
+/**
+ * UpdateSkillPath 对齐 update_skill_path。
+ */
+export function UpdateSkillPath(currentName: string, name: string, dir: string): $CancellablePromise<$models.WorkspacePathMutationResult | null> {
+    return $Call.ByID(2532585671, currentName, name, dir);
 }
 
 /**
@@ -245,22 +276,10 @@ export function UpdateSkillSource(input: $models.SkillSourceMutationInput): $Can
 }
 
 /**
- * UpdateWorkspaceMCP 对齐 update_workspace_mcp：更新不携带 created_at。
+ * UpdateWorkspaceMCP 对齐 update_workspace_mcp：更新不携带 created_at；
+ * 改名时由后端在锁内一次完成登记更新与已装路径重写（apply 新名 + remove
+ * 旧名），前端不再串行逐路径调用。
  */
 export function UpdateWorkspaceMCP(serverName: string, name: string, transport: string, homepage: string | null, command: string | null, args: string[] | null, env: { [_ in string]?: string } | null, url: string | null, headers: { [_ in string]?: string } | null, timeout: number | null): $CancellablePromise<$models.WorkspaceMcpMutationResult | null> {
     return $Call.ByID(3752350652, serverName, name, transport, homepage, command, args, env, url, headers, timeout);
-}
-
-/**
- * UpdateWorkspaceProject 对齐 update_workspace_project。
- */
-export function UpdateWorkspaceProject(input: $models.ProjectMutationInput): $CancellablePromise<$models.WorkspaceTargetMutationResult | null> {
-    return $Call.ByID(3017261645, input);
-}
-
-/**
- * UpdateWorkspaceTarget 对齐 update_workspace_target。
- */
-export function UpdateWorkspaceTarget(currentTargetID: string, targetID: string, skillDir: string, configPath: string | null): $CancellablePromise<$models.WorkspaceTargetMutationResult | null> {
-    return $Call.ByID(1715928929, currentTargetID, targetID, skillDir, configPath);
 }

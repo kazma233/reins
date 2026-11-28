@@ -1,8 +1,9 @@
-// dialog.go：rfd 同步文件/目录对话框的端口化。Rust 版在 5 处直接调 rfd
-// （选项目目录、选本地来源目录、选 target skills 目录、选 target MCP 配置
-// 文件、选批量导入 JSON 文件），同步阻塞无法在测试里驱动；Go 侧收敛成最小
-// DialogPort 接口由调用方注入——生产用 Wails 的 app.Dialog 实现，测试用
-// fake。接口只承载这 5 处实际用到的能力，不预支 rfd 的完整面。
+// dialog.go：rfd 同步文件/目录对话框的端口化。Rust 版在 4 处直接调 rfd
+// （选本地来源目录、选技能路径目录、选 MCP 路径配置文件、选批量导入 JSON
+// 文件；项目目录选择器随项目级分发的移除而删除），同步阻塞无法在测试里
+// 驱动；Go 侧收敛成最小 DialogPort 接口由调用方注入——生产用 Wails 的
+// app.Dialog 实现，测试用 fake。接口只承载这些调用点实际用到的能力，不
+// 预支 rfd 的完整面。
 package workspace
 
 // DialogFilter：文件选择器的扩展名过滤（rfd add_filter 的对应物）。

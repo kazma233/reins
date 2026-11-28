@@ -1,5 +1,5 @@
-// workspace_grokbuild_test.go：grokbuild target 的模板/预设一致性、显式路径
-// 优先、skill 链接生命周期与 TOML MCP 读写（对齐 tests/workspace_grokbuild.rs）。
+// workspace_grokbuild_test.go：grokbuild 的预设一致性、显式路径优先、skill
+// 链接生命周期与 TOML MCP 读写（对齐 tests/workspace_grokbuild.rs）。
 package workspace
 
 import (
@@ -14,7 +14,7 @@ import (
 	"reins/internal/support"
 )
 
-func TestGrokbuildDefaultsTemplateAndPresetAgree(t *testing.T) {
+func TestGrokbuildMcpPathPresetFollowsGrokHome(t *testing.T) {
 	_, dir := newTestStore(t, "grok-defaults")
 	grokRoot := filepath.Join(dir, "grok-home")
 	if err := os.MkdirAll(grokRoot, 0o777); err != nil {
@@ -23,49 +23,42 @@ func TestGrokbuildDefaultsTemplateAndPresetAgree(t *testing.T) {
 	t.Setenv("GROK_HOME", grokRoot)
 	env := envOf(t)
 
-	path := filepath.Join(t.TempDir(), "reins-grok-defaults.yaml")
-	config, err := parseManagerConfig(DefaultConfigTemplate(env), path, env)
-	if err != nil {
-		t.Fatalf("parse: %v", err)
-	}
-	target := config.targetByID("grokbuild")
-	if target == nil {
-		t.Fatal("grokbuild target exists")
-	}
-	root := grokRoot
-	if _, redirected := env.Value(agents.RootGrokHome.Redirect); !redirected {
-		home, ok := support.UserHomeDir()
-		if !ok {
-			t.Fatal("测试环境缺少 HOME")
-		}
-		root = joinPath(home, ".grok")
-	}
-	if target.SkillDir != joinPath(root, "skills") {
-		t.Fatalf("skill_dir：%s", target.SkillDir)
-	}
-	if target.ConfigPath == nil || *target.ConfigPath != joinPath(root, "config.toml") {
-		t.Fatalf("config_path：%+v", target.ConfigPath)
-	}
-	if target.MCPConfigPrefix != "mcp_servers" || target.MCPConfigType != agents.McpConfigGrokBuild {
-		t.Fatalf("mcp 布局：%+v", target)
-	}
-	// 预设列表是封闭集合（七个内置工具），不存在“未知内置 target”分支。
-	presets := TargetPresetsInner(envOf(t))
-	var preset *TargetPreset
+	// 预设路径在派生时读取 GROK_HOME：这正是前端静态预设无法预填、需要
+	// 后端下发的原因。
+	presets := GetSkillPathPresetsInner(env)
+	var skillPreset *SkillPathPreset
 	for i := range presets {
-		if string(presets[i].TargetID) == "grokbuild" {
-			preset = &presets[i]
+		if presets[i].Name == "Grok Build" {
+			skillPreset = &presets[i]
 		}
 	}
-	if preset == nil {
-		t.Fatal("缺少 grokbuild 预设")
+	if skillPreset == nil {
+		t.Fatal("缺少 grokbuild 技能路径预设")
 	}
-	if preset.SkillDir != joinPath(root, "skills") {
-		t.Fatalf("preset skill_dir：%s", preset.SkillDir)
+	if skillPreset.Dir != joinPath(grokRoot, "skills") {
+		t.Fatalf("preset dir：%s", skillPreset.Dir)
 	}
-	if preset.ConfigPath == nil || *preset.ConfigPath != joinPath(root, "config.toml") {
-		t.Fatalf("preset config_path：%+v", preset.ConfigPath)
+
+	mcpPresets := GetMcpPathPresetsInner(env)
+	var mcpPreset *McpPathPreset
+	for i := range mcpPresets {
+		if mcpPresets[i].Name == "Grok Build" {
+			mcpPreset = &mcpPresets[i]
+		}
 	}
+	if mcpPreset == nil {
+		t.Fatal("缺少 grokbuild MCP 路径预设")
+	}
+	if mcpPreset.ConfigPath != joinPath(grokRoot, "config.toml") {
+		t.Fatalf("preset config_path：%s", mcpPreset.ConfigPath)
+	}
+	if mcpPreset.ConfigPrefix != "mcp_servers" {
+		t.Fatalf("preset prefix：%s", mcpPreset.ConfigPrefix)
+	}
+	if mcpPreset.ConfigType != string(agents.McpConfigGrokBuild) {
+		t.Fatalf("preset config_type：%s", mcpPreset.ConfigType)
+	}
+
 	// config_type 的存储串是 serde snake_case：读取与写入互逆，未知串报错。
 	if string(agents.McpConfigGrokBuild) != "grokbuild" {
 		t.Fatalf("存储串漂移：%s", agents.McpConfigGrokBuild)
@@ -78,23 +71,20 @@ func TestGrokbuildDefaultsTemplateAndPresetAgree(t *testing.T) {
 	}
 }
 
-func TestGrokbuildExplicitPathsWinAndOldConfigIsUnchanged(t *testing.T) {
+func TestGrokbuildExplicitPathsWinAndLegacyConfigIsUnchanged(t *testing.T) {
 	store, root := newTestStore(t, "grok-explicit")
-	raw := "targets:\n  grokbuild:\n    skill_dir: explicit/skills\n    mcp:\n      config_path: explicit/config.toml\n"
+	raw := "skill_paths:\n  grokbuild:\n    dir: explicit/skills\nmcp_paths:\n  grokbuild:\n    config_path: explicit/config.toml\n"
 	writeFileT(t, store.ConfigPath(), raw)
 	config, err := store.Parse()
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	target := config.targetByID("grokbuild")
-	if target == nil {
-		t.Fatal("grokbuild target exists")
+	path := config.skillPathByName("grokbuild")
+	if path == nil {
+		t.Fatal("grokbuild skill path exists")
 	}
-	if target.SkillDir != joinPath(root, "explicit/skills") {
-		t.Fatalf("skill_dir：%s", target.SkillDir)
-	}
-	if target.ConfigPath == nil || *target.ConfigPath != joinPath(root, "explicit/config.toml") {
-		t.Fatalf("config_path：%+v", target.ConfigPath)
+	if path.Dir != joinPath(root, "explicit/skills") {
+		t.Fatalf("dir：%s", path.Dir)
 	}
 	if _, err := store.LoadDocument(); err != nil {
 		t.Fatalf("load: %v", err)
@@ -103,27 +93,29 @@ func TestGrokbuildExplicitPathsWinAndOldConfigIsUnchanged(t *testing.T) {
 		t.Fatalf("load_document 不应改写显式配置：\n got: %q\nwant: %q", got, raw)
 	}
 
-	old := "targets:\n  pi:\n    enabled: true\n    skill_dir: isolated/skills\n"
+	// 旧 schema（targets:）读时迁移成 skill_paths 视图，但文件原样保留：
+	// 迁移发生在内存，落盘收敛等到下一次真实写盘。
+	old := "targets:\n  grokbuild:\n    skill_dir: isolated/skills\n"
 	writeFileT(t, store.ConfigPath(), old)
 	document, err := store.LoadDocument()
 	if err != nil {
 		t.Fatalf("load old: %v", err)
 	}
-	if document.Config == nil || len(document.Config.Targets) != 1 {
-		t.Fatalf("old config targets：%+v", document.Config)
+	if document.Config == nil || len(document.Config.SkillPaths) != 1 {
+		t.Fatalf("迁移视图 skill_paths：%+v", document.Config)
 	}
 	if got := readFileT(t, store.ConfigPath()); got != old {
-		t.Fatalf("旧配置不该被模板改写：\n got: %q\nwant: %q", got, old)
+		t.Fatalf("旧配置不该在读路径被改写：\n got: %q\nwant: %q", got, old)
 	}
 	if config2, err := store.Parse(); err != nil {
 		t.Fatalf("parse old: %v", err)
-	} else if config2.targetByID("grokbuild") != nil {
-		t.Fatal("旧配置里不该有 grokbuild")
+	} else if config2.skillPathByName("grokbuild") == nil {
+		t.Fatal("迁移视图里应有 grokbuild")
 	}
 }
 
-// 与 dsh fixture 同构：MCP 名称/transport/timeout 可注入，target 覆盖全局
-// 内置、自定义与项目级三种形态。
+// 与 dsh fixture 同构：MCP 名称/transport/timeout 可注入，skill 路径覆盖
+// 全局内置与自定义两种形态。
 func grokFixture(t *testing.T, root string, transport string, timeout *uint64) *WorkspaceConfigStore {
 	t.Helper()
 	store := NewWorkspaceConfigStoreAt(root)
@@ -132,27 +124,23 @@ func grokFixture(t *testing.T, root string, transport string, timeout *uint64) *
 	if timeout != nil {
 		timeoutValue = strconv.FormatUint(*timeout, 10)
 	}
-	writeFileT(t, store.ConfigPath(), fmt.Sprintf(`targets:
+	writeFileT(t, store.ConfigPath(), fmt.Sprintf(`skill_paths:
   grokbuild:
-    skill_dir: global/.grok/skills
-    mcp:
-      config_path: global/.grok/config.toml
-  custom:
-    skill_dir: custom/skills
-    mcp:
-      config_path: custom/config.toml
-      config_prefix: mcp_servers
-      config_type: grokbuild
+    dir: global/.grok/skills
   codex:
-    skill_dir: codex/skills
-    mcp:
-      config_path: codex/config.toml
-projects:
-  demo:
-    path: project
-    agents:
-      grokbuild:
-        enabled: true
+    dir: codex/skills
+mcp_paths:
+  grokbuild:
+    config_path: global/.grok/config.toml
+    config_type: grokbuild
+  custom:
+    config_path: custom/config.toml
+    config_prefix: mcp_servers
+    config_type: grokbuild
+  codex:
+    config_path: codex/config.toml
+    config_prefix: mcp_servers
+    config_type: common
 skill_sources:
   - id: first
     type: local
@@ -162,7 +150,6 @@ skill_sources:
     root_path: source-b
 mcps:
 - name: probe
-  enabled: false
   transport: %s
   command: node
   args: [server.js]
@@ -176,7 +163,7 @@ mcps:
 	return store
 }
 
-func TestGrokbuildProjectLayoutAndSkillLinkLifecycle(t *testing.T) {
+func TestGrokbuildSkillLinkLifecycle(t *testing.T) {
 	root := testsupportTestDir(t, "grok-skills")
 	store := grokFixture(t, root, "stdio", nil)
 	writeTestSkill(t, filepath.Join(root, "source-a"), "probe", "---\nname: probe\ndescription: synthetic\n---\nA")
@@ -185,43 +172,28 @@ func TestGrokbuildProjectLayoutAndSkillLinkLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	project := config.targetByID("demo:grokbuild")
-	if project == nil {
-		t.Fatal("demo:grokbuild target exists")
-	}
-	// 项目 target 的落点 = 项目 path 解析结果 + spec 项目布局（两级 joinPath）。
-	if project.SkillDir != joinPath(joinPath(root, "project"), ".grok/skills") {
-		t.Fatalf("project skill_dir：%s", project.SkillDir)
-	}
-	if project.ConfigPath == nil || *project.ConfigPath != joinPath(joinPath(root, "project"), ".grok/config.toml") {
-		t.Fatalf("project config_path：%+v", project.ConfigPath)
-	}
-	if project.MCPConfigType != agents.McpConfigGrokBuild {
-		t.Fatalf("project config_type：%s", project.MCPConfigType)
-	}
-
-	targets := []string{"grokbuild", "demo:grokbuild"}
+	paths := []string{"grokbuild", "codex"}
 	input := SourceSyncInput{
 		SourceID:   "first",
 		SkillPaths: []string{"probe"},
-		TargetIDs:  targets,
+		PathIDs:    paths,
 	}
-	result, err := SyncSourceToTargetsInner(store, input)
+	result, err := SyncSourceToPathsInner(store, input)
 	if err != nil {
 		t.Fatalf("sync: %v", err)
 	}
 	if len(result.Applied) != 2 {
 		t.Fatalf("applied：%d", len(result.Applied))
 	}
-	for _, id := range targets {
-		dest := filepath.Join(config.targetByID(id).SkillDir, "probe")
+	for _, name := range paths {
+		dest := filepath.Join(config.skillPathByName(name).Dir, "probe")
 		linked, err := readSkillDirLink(dest)
 		if err != nil {
 			t.Fatalf("readSkillDirLink(%s): %v", dest, err)
 		}
 		want := linkTarget(t, filepath.Join(root, "source-a", "probe"))
 		if linked == nil || *linked != want {
-			t.Fatalf("%s 链接应指向 source-a：%+v != %s", id, linked, want)
+			t.Fatalf("%s 链接应指向 source-a：%+v != %s", name, linked, want)
 		}
 	}
 
@@ -233,26 +205,26 @@ func TestGrokbuildProjectLayoutAndSkillLinkLifecycle(t *testing.T) {
 	if len(conflicts) != 2 {
 		t.Fatalf("切换来源后应报两条冲突：%d", len(conflicts))
 	}
-	if _, err := SyncSourceToTargetsInner(store, input); err == nil {
+	if _, err := SyncSourceToPathsInner(store, input); err == nil {
 		t.Fatal("不覆盖时同步必须被冲突阻断")
 	}
 	input.OverwriteExisting = true
-	result, err = SyncSourceToTargetsInner(store, input)
+	result, err = SyncSourceToPathsInner(store, input)
 	if err != nil {
 		t.Fatalf("overwrite sync: %v", err)
 	}
 	if len(result.Applied) != 2 {
 		t.Fatalf("覆盖同步 applied：%d", len(result.Applied))
 	}
-	removeResult, err := RemoveSourceSyncInner(store, "second", targets)
+	removeResult, err := RemoveSourceSyncInner(store, "second", paths)
 	if err != nil {
 		t.Fatalf("remove sync: %v", err)
 	}
 	if len(removeResult.Removed) != 2 {
 		t.Fatalf("removed：%d", len(removeResult.Removed))
 	}
-	for _, id := range targets {
-		dest := filepath.Join(config.targetByID(id).SkillDir, "probe")
+	for _, name := range paths {
+		dest := filepath.Join(config.skillPathByName(name).Dir, "probe")
 		assertLinkMissing(t, dest)
 	}
 	if _, err := os.Stat(filepath.Join(root, "source-a", "probe", "SKILL.md")); err != nil {
@@ -271,14 +243,14 @@ func TestGrokbuildMcpPreviewApplyReadRemovePreservesUnrelatedConfig(t *testing.T
 		if err != nil {
 			t.Fatalf("parse: %v", err)
 		}
-		for _, id := range []string{"grokbuild", "custom", "demo:grokbuild"} {
-			target := config.targetByID(id)
-			path := *target.ConfigPath
-			writeFileT(t, path, "model = 'unchanged'\n[mcp_servers.other]\ncommand = 'keep'\n")
+		for _, name := range []string{"grokbuild", "custom"} {
+			path := config.mcpPathByName(name)
+			configPath := path.ConfigPath
+			writeFileT(t, configPath, "model = 'unchanged'\n[mcp_servers.other]\ncommand = 'keep'\n")
 
-			preview, err := PreviewMCPTargetInner(store, "probe", id)
+			preview, err := previewMCPCell(mustParseT(t, store), "probe", name)
 			if err != nil {
-				t.Fatalf("preview %s(%s): %v", id, transport, err)
+				t.Fatalf("preview %s(%s): %v", name, transport, err)
 			}
 			if preview.Format != "toml" {
 				t.Fatalf("format：%s", preview.Format)
@@ -310,37 +282,36 @@ func TestGrokbuildMcpPreviewApplyReadRemovePreservesUnrelatedConfig(t *testing.T
 				}
 			}
 
-			if _, err := ApplyMCPToTargetInner(store, "probe", id); err != nil {
-				t.Fatalf("apply %s(%s): %v", id, transport, err)
+			if _, err := applyMCPCell(mustParseT(t, store), "probe", name); err != nil {
+				t.Fatalf("apply %s(%s): %v", name, transport, err)
 			}
-			first := readFileT(t, path)
-			if _, err := ApplyMCPToTargetInner(store, "probe", id); err != nil {
-				t.Fatalf("apply twice %s(%s): %v", id, transport, err)
+			first := readFileT(t, configPath)
+			if _, err := applyMCPCell(mustParseT(t, store), "probe", name); err != nil {
+				t.Fatalf("apply twice %s(%s): %v", name, transport, err)
 			}
-			if got := readFileT(t, path); got != first {
-				t.Fatalf("重复 apply 必须幂等（字节一致）：%s(%s)", id, transport)
+			if got := readFileT(t, configPath); got != first {
+				t.Fatalf("重复 apply 必须幂等（字节一致）：%s(%s)", name, transport)
 			}
 
-			env := &support.Environment{}
-			entries, err := ReadExistingMCPEntries(target, path, env)
+			entries, err := ReadExistingMCPEntries(path, configPath)
 			if err != nil {
-				t.Fatalf("read entries %s: %v", id, err)
+				t.Fatalf("read entries %s: %v", name, err)
 			}
 			if entries["probe"] == nil {
 				t.Fatalf("应读到 probe 条目：%v", entries)
 			}
 
-			if _, err := RemoveMCPFromTargetInner(store, "probe", id); err != nil {
-				t.Fatalf("remove %s: %v", id, err)
+			if _, err := removeMCPCell(mustParseT(t, store), "probe", name); err != nil {
+				t.Fatalf("remove %s: %v", name, err)
 			}
-			after := parseTOMLT(t, readFileT(t, path))
+			after := parseTOMLT(t, readFileT(t, configPath))
 			original := parseTOMLT(t, "model = 'unchanged'\n[mcp_servers.other]\ncommand = 'keep'\n")
 			if !tomlEqual(after, original) {
-				t.Fatalf("删除后应还原原配置 %s(%s)：\n%v\n%v", id, transport, after, original)
+				t.Fatalf("删除后应还原原配置 %s(%s)：\n%v\n%v", name, transport, after, original)
 			}
-			mutation, err := RemoveMCPFromTargetInner(store, "probe", id)
+			mutation, err := removeMCPCell(mustParseT(t, store), "probe", name)
 			if err != nil {
-				t.Fatalf("remove twice %s: %v", id, err)
+				t.Fatalf("remove twice %s: %v", name, err)
 			}
 			if mutation.Action != "noop" {
 				t.Fatalf("二次删除应为 noop：%+v", mutation)
@@ -352,19 +323,19 @@ func TestGrokbuildMcpPreviewApplyReadRemovePreservesUnrelatedConfig(t *testing.T
 func TestGrokbuildTimeoutRejectsFractionalSecondsWithoutChangingCodex(t *testing.T) {
 	root := testsupportTestDir(t, "grok-timeout")
 	store := grokFixture(t, root, "http", ptrUint64(1500))
-	if _, err := PreviewMCPTargetInner(store, "probe", "grokbuild"); err == nil {
+	if _, err := previewMCPCell(mustParseT(t, store), "probe", "grokbuild"); err == nil {
 		t.Fatal("非整秒必须报错")
 	} else if !strings.Contains(err.Error(), "整秒") {
 		t.Fatalf("错误文案：%v", err)
 	}
-	if _, err := ApplyMCPToTargetInner(store, "probe", "grokbuild"); err == nil {
+	if _, err := applyMCPCell(mustParseT(t, store), "probe", "grokbuild"); err == nil {
 		t.Fatal("apply 也必须拒绝非整秒")
 	}
 	if _, err := os.Stat(filepath.Join(root, "global", ".grok", "config.toml")); !os.IsNotExist(err) {
 		t.Fatalf("失败路径不得创建文件：%v", err)
 	}
 
-	preview, err := PreviewMCPTargetInner(store, "probe", "codex")
+	preview, err := previewMCPCell(mustParseT(t, store), "probe", "codex")
 	if err != nil {
 		t.Fatalf("codex preview: %v", err)
 	}
@@ -381,7 +352,7 @@ func TestGrokbuildTimeoutRejectsFractionalSecondsWithoutChangingCodex(t *testing
 
 	for _, timeout := range []*uint64{nil, ptrUint64(0), ptrUint64(^uint64(0) - ^uint64(0)%1000)} {
 		store := grokFixture(t, root, "stdio", timeout)
-		preview, err := PreviewMCPTargetInner(store, "probe", "grokbuild")
+		preview, err := previewMCPCell(mustParseT(t, store), "probe", "grokbuild")
 		if err != nil {
 			t.Fatalf("preview(%v): %v", timeout, err)
 		}
@@ -410,24 +381,23 @@ func TestGrokbuildRejectsJSONAndMalformedConfigWithoutWriting(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	target := config.targetByID("grokbuild")
-	path := *target.ConfigPath
-	env := &support.Environment{}
+	path := config.mcpPathByName("grokbuild")
+	configPath := path.ConfigPath
 	for _, content := range []string{`{"mcp_servers":{}}`, "[invalid"} {
-		writeFileT(t, path, content)
-		if _, err := PreviewMCPTargetInner(store, "probe", "grokbuild"); err == nil {
+		writeFileT(t, configPath, content)
+		if _, err := previewMCPCell(mustParseT(t, store), "probe", "grokbuild"); err == nil {
 			t.Fatalf("preview(%q) 应报错", content)
 		}
-		if _, err := ApplyMCPToTargetInner(store, "probe", "grokbuild"); err == nil {
+		if _, err := applyMCPCell(mustParseT(t, store), "probe", "grokbuild"); err == nil {
 			t.Fatalf("apply(%q) 应报错", content)
 		}
-		if _, err := ReadExistingMCPEntries(target, path, env); err == nil {
+		if _, err := ReadExistingMCPEntries(path, configPath); err == nil {
 			t.Fatalf("read(%q) 应报错", content)
 		}
-		if _, err := RemoveMCPFromTargetInner(store, "probe", "grokbuild"); err == nil {
+		if _, err := removeMCPCell(mustParseT(t, store), "probe", "grokbuild"); err == nil {
 			t.Fatalf("remove(%q) 应报错", content)
 		}
-		if got := readFileT(t, path); got != content {
+		if got := readFileT(t, configPath); got != content {
 			t.Fatalf("失败路径不得改写文件：\n got: %q\nwant: %q", got, content)
 		}
 	}

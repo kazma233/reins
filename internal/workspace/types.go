@@ -1,8 +1,11 @@
-// Package workspace：目标/技能源/MCP 分发域。wire 契约经 frontend/bindings/
-// 暴露给前端（wails 生成、不手改）：字段 camelCase、枚举 snake_case
-// （SkillLinkState 是唯一 camelCase 例外）、Option 字段区分「省略」（omitempty
-// 指针）与「写 null」（裸指针）；本包的 JSON 结构与该口径逐字段核对（见
-// types_wire_test.go）。
+// Package workspace：技能路径/MCP 路径/技能源/MCP server 分发域。wire 契约经
+// frontend/bindings/ 暴露给前端（wails 生成、不手改）：字段 camelCase、枚举
+// snake_case（SkillLinkState 是唯一 camelCase 例外）、Option 字段区分「省略」
+// （omitempty 指针）与「写 null」（裸指针）；本包的 JSON 结构与该口径逐字段
+// 核对（见 types_wire_test.go）。
+//
+// 旧 schema（2026-11-28 前的 targets/projects）只在读入时迁移，见
+// RawManagerConfig.UnmarshalYAML 与 docs/decisions/2026-11-28-skill-and-mcp-paths.md。
 package workspace
 
 import (
@@ -16,10 +19,6 @@ import (
 	"reins/internal/agents"
 	"reins/internal/support"
 )
-
-// AgentTargetID：workspace 域的 target 标识（Rust AgentTargetId newtype）。
-// wire 上就是字符串；规范化只经 normalizeTargetID 构造。
-type AgentTargetID string
 
 // ---------------------------------------------------------------------------
 // 枚举（wire 拼写即常量值）
@@ -57,16 +56,19 @@ func debugTransport(t McpTransport) string {
 }
 
 // parseMcpConfigType：config_type 存储串 → 枚举；未知值报错（serde
-// unknown variant 语义，config_type 只在后端内部使用，不进 wire）。
+// unknown variant 语义，config_type 只在后端内部与预设下发使用）。
 func parseMcpConfigType(value string) (agents.McpConfigType, error) {
 	switch agents.McpConfigType(value) {
 	case agents.McpConfigCommon, agents.McpConfigOpenCode, agents.McpConfigGrokBuild, agents.McpConfigDsh:
 		return agents.McpConfigType(value), nil
+	case agents.McpConfigHermes:
+		// 旧配置的 hermes 类型：方言与 common 相同（YAML 载体），归一。
+		return agents.McpConfigCommon, nil
 	}
 	return "", fmt.Errorf("未知 config_type：%s", value)
 }
 
-// SkillLinkState：target skills 目录下链接的归类（serde camelCase——该枚举
+// SkillLinkState：技能路径目录下链接的归类（serde camelCase——该枚举
 // 是前端契约里唯一的 camelCase 枚举，拼写以 ts 生成物为准）。
 type SkillLinkState string
 
@@ -77,14 +79,22 @@ const (
 	LinkStateUnmanaged    SkillLinkState = "unmanaged"
 )
 
-// McpTargetState：MCP 条目在 target 配置里的在场状态（serde snake_case）。
-type McpTargetState string
+// McpPathState：MCP 条目在 MCP 路径配置里的在场状态（serde snake_case）。
+type McpPathState string
 
 const (
-	TargetStatePresent      McpTargetState = "present"
-	TargetStateMissing      McpTargetState = "missing"
-	TargetStateError        McpTargetState = "error"
-	TargetStateUnconfigured McpTargetState = "unconfigured"
+	PathStatePresent McpPathState = "present"
+	PathStateMissing McpPathState = "missing"
+	PathStateError   McpPathState = "error"
+)
+
+// McpSyncAction：MCP 矩阵同步预演条目的动作（值即契约，前端按成员引用
+// 分组渲染确认清单）。
+type McpSyncAction string
+
+const (
+	McpSyncActionCreate McpSyncAction = "create"
+	McpSyncActionRemove McpSyncAction = "remove"
 )
 
 // ---------------------------------------------------------------------------
@@ -142,20 +152,29 @@ type WorkspaceConfigDocument struct {
 
 // WorkspaceConfigView：解析后的配置视图。
 type WorkspaceConfigView struct {
-	Targets      []TargetConfigView      `json:"targets"`
+	SkillPaths   []SkillPathView         `json:"skillPaths"`
+	McpPaths     []McpPathView           `json:"mcpPaths"`
 	SkillSources []SkillSourceConfigView `json:"skillSources"`
 	Mcps         []McpConfigView         `json:"mcps"`
-	Projects     []ProjectConfigView     `json:"projects"`
 }
 
-// TargetConfigView：target 编辑页视图。
-type TargetConfigView struct {
-	ID                   AgentTargetID      `json:"id"`
-	SkillDir             string             `json:"skillDir"`
-	ConfigPath           *string            `json:"configPath"` // 写 null 的 Option
-	MCPConfigPrefix      string             `json:"mcpConfigPrefix"`
+// SkillPathView：技能路径条目视图。
+type SkillPathView struct {
+	Name string `json:"name"`
+	Dir  string `json:"dir"`
+}
+
+// McpPathView：MCP 路径条目视图。config_type 由创建时选定、更新时保留
+// 存量值，视图不携带（与旧 target 的编辑契约一致）。
+type McpPathView struct {
+	Name                 string             `json:"name"`
+	ConfigPath           string             `json:"configPath"`
+	ConfigPrefix         string             `json:"configPrefix"`
 	MCPFormatDescription string             `json:"mcpFormatDescription"`
 	MCPFormatExamples    []McpFormatExample `json:"mcpFormatExamples"`
+	// SSEUnsupported：该配置文件对应的工具不接受 legacy SSE transport；
+	// 前端据此禁用矩阵里 SSE server 的格子（值即契约，知识来自清单）。
+	SSEUnsupported bool `json:"sseUnsupported"`
 }
 
 // McpFormatExample：一段写入形态示例（形态标题 + 已序列化正文）。
@@ -164,14 +183,30 @@ type McpFormatExample struct {
 	Body  string `json:"body"`
 }
 
-// TargetPreset：创建弹窗一次下发的内置工具预设（路径为 env 解析后的绝对
-// 真实路径，grokbuild/pi 也能预填）。
-type TargetPreset struct {
-	TargetID        AgentTargetID `json:"targetId"`
-	Label           string        `json:"label"`
-	SkillDir        string        `json:"skillDir"`
-	ConfigPath      *string       `json:"configPath"` // 写 null 的 Option
-	MCPConfigPrefix string        `json:"mcpConfigPrefix"`
+// SkillPathPreset：技能路径创建弹窗的内置工具预设（目录为 env 解析后的
+// 绝对真实路径；Name 是预填条目名，用户可改）。
+type SkillPathPreset struct {
+	Name string `json:"name"`
+	Dir  string `json:"dir"`
+}
+
+// McpPathPreset：MCP 路径创建弹窗的内置工具预设。ConfigType 随预设下发、
+// 创建时原样传回（预设的格式知识归清单，前端不再静态维护）。
+type McpPathPreset struct {
+	Name              string `json:"name"`
+	ConfigPath        string `json:"configPath"`
+	ConfigPrefix      string `json:"configPrefix"`
+	ConfigType        string `json:"configType"`
+	FormatDescription string `json:"formatDescription"`
+}
+
+// McpFormatInfo：一个 MCP 配置格式的说明与写入形态示例（创建弹窗的格式
+// 选择区下发；示例与真实写入走同一构造路径，前缀取该格式在清单里首个工具
+// 的约定值，用户改前缀后以编辑页示例为准）。
+type McpFormatInfo struct {
+	ConfigType     string             `json:"configType"`
+	Description    string             `json:"description"`
+	FormatExamples []McpFormatExample `json:"formatExamples"`
 }
 
 // SkillSourceConfigView：来源列表条目。Rust 侧是 tag="type" 判别联合，Go
@@ -207,64 +242,49 @@ type McpConfigView struct {
 	Timeout   *uint64           `json:"timeout"`
 }
 
-// ProjectConfigView：项目视图。
-type ProjectConfigView struct {
-	ID     string             `json:"id"`
-	Path   string             `json:"path"`
-	Agents []TargetConfigView `json:"agents"`
-}
-
 // WorkspaceInspection：盘上现状巡检。
 type WorkspaceInspection struct {
-	ConfigPath string              `json:"configPath"`
-	Targets    []TargetInspection  `json:"targets"`
-	Mcps       []McpInspection     `json:"mcps"`
-	Projects   []ProjectInspection `json:"projects"`
-	Warnings   []string            `json:"warnings"`
+	ConfigPath string                `json:"configPath"`
+	SkillPaths []SkillPathInspection `json:"skillPaths"`
+	Mcps       []McpInspection       `json:"mcps"`
+	Warnings   []string              `json:"warnings"`
 }
 
-// ProjectInspection：项目巡检。
-type ProjectInspection struct {
-	ID     string             `json:"id"`
-	Agents []TargetInspection `json:"agents"`
+// SkillPathInspection：技能路径巡检（dirLink 为「写 null」的 Option）。
+type SkillPathInspection struct {
+	Name      string            `json:"name"`
+	DirExists bool              `json:"dirExists"`
+	DirLink   *SkillDirLinkView `json:"dirLink"`
 }
 
-// TargetInspection：target 巡检（skillDirLink 为「写 null」的 Option）。
-type TargetInspection struct {
-	ID             AgentTargetID     `json:"id"`
-	SkillDirExists bool              `json:"skillDirExists"`
-	SkillDirLink   *SkillDirLinkView `json:"skillDirLink"`
-}
-
-// McpInspection：MCP 在各 target 的巡检。
+// McpInspection：MCP 条目在各 MCP 路径的巡检。
 type McpInspection struct {
-	Name    string                `json:"name"`
-	Targets []McpTargetInspection `json:"targets"`
+	Name  string                   `json:"name"`
+	Paths []McpPathStateInspection `json:"paths"`
 }
 
-// McpTargetInspection：单 target 的 MCP 在场状态（projectId 未填省略）。
-type McpTargetInspection struct {
-	TargetID  AgentTargetID  `json:"targetId"`
-	ProjectID *string        `json:"projectId,omitempty"`
-	State     McpTargetState `json:"state"`
-	Detail    string         `json:"detail"`
+// McpPathStateInspection：单条 MCP 路径的条目在场状态。
+type McpPathStateInspection struct {
+	PathID string       `json:"pathId"`
+	State  McpPathState `json:"state"`
+	Detail string       `json:"detail"`
 }
 
 // SkillDirLinkView：给界面的落点链接归属（可选字段只发有值的那部分）。
-// 别名 = 这个 target 不拥有那个目录，前端据它禁用与标注。
+// 别名 = 这条技能路径不拥有那个目录，前端据它禁用与标注。
 type SkillDirLinkView struct {
-	LinkedTargetID *string `json:"linkedTargetId,omitempty"`
-	LinkTarget     string  `json:"linkTarget"`
+	LinkedPathID *string `json:"linkedPathId,omitempty"`
+	LinkTarget   string  `json:"linkTarget"`
 }
 
 // SkillSyncItem：同步/卸载的事实条目。
 type SkillSyncItem struct {
-	SkillName       string        `json:"skillName"`
-	TargetID        AgentTargetID `json:"targetId"`
-	SourcePath      string        `json:"sourcePath"`
-	DestinationPath string        `json:"destinationPath"`
-	Action          string        `json:"action"`
-	Detail          string        `json:"detail"`
+	SkillName       string `json:"skillName"`
+	PathID          string `json:"pathId"`
+	SourcePath      string `json:"sourcePath"`
+	DestinationPath string `json:"destinationPath"`
+	Action          string `json:"action"`
+	Detail          string `json:"detail"`
 }
 
 // WorkspaceMcpMutationResult：MCP 增删改结果。
@@ -273,29 +293,83 @@ type WorkspaceMcpMutationResult struct {
 	UpdatedPaths []string `json:"updatedPaths"`
 }
 
-// WorkspaceTargetMutationResult：target/项目增删改结果。
-type WorkspaceTargetMutationResult struct {
-	TargetID     AgentTargetID `json:"targetId"`
-	UpdatedPaths []string      `json:"updatedPaths"`
+// WorkspacePathMutationResult：技能路径/MCP 路径增删改结果。
+type WorkspacePathMutationResult struct {
+	PathID       string   `json:"pathId"`
+	UpdatedPaths []string `json:"updatedPaths"`
 }
 
-// McpTargetMutationResult：单 target 的 MCP 应用/移除结果（updatedPath 为
+// McpPathMutationResult：单条 MCP 路径的应用/移除结果（updatedPath 为
 // 「写 null」的 Option：noop 时为 null）。
-type McpTargetMutationResult struct {
-	ServerName  string        `json:"serverName"`
-	TargetID    AgentTargetID `json:"targetId"`
-	UpdatedPath *string       `json:"updatedPath"`
-	Action      string        `json:"action"`
-	Detail      string        `json:"detail"`
+type McpPathMutationResult struct {
+	ServerName  string  `json:"serverName"`
+	PathID      string  `json:"pathId"`
+	UpdatedPath *string `json:"updatedPath"`
+	Action      string  `json:"action"`
+	Detail      string  `json:"detail"`
 }
 
-// McpTargetPreviewResult：单 target 的 MCP 预览。
-type McpTargetPreviewResult struct {
+// McpSyncInput：MCP 矩阵同步入参：cells 是勾选的格子（登记 server × MCP
+// 路径）；未勾选的组合按收敛语义处理（已装移除、未装不动），见决策记录
+// 2026-11-28-mcp-matrix-sync.md 第 2 条。
+type McpSyncInput struct {
+	Cells []McpSyncCell `json:"cells"`
+}
+
+// McpSyncCell：矩阵里勾选的一个格子。
+type McpSyncCell struct {
+	ServerName string `json:"serverName"`
+	PathID     string `json:"pathId"`
+}
+
+// McpSyncPreviewItem：聚合预演的条目级清单项（只列状态会变化的格子）。
+// format/content 为「写 null」的 Option：仅创建项且条目构造成功时有值，
+// 与真实写入同一条构造路径（writer 的 previewEntry）。
+type McpSyncPreviewItem struct {
 	ServerName string        `json:"serverName"`
-	TargetID   AgentTargetID `json:"targetId"`
+	PathID     string        `json:"pathId"`
+	Action     McpSyncAction `json:"action"`
 	ConfigPath string        `json:"configPath"`
-	Format     string        `json:"format"`
-	Content    string        `json:"content"`
+	Format     *string       `json:"format"`
+	Content    *string       `json:"content"`
+	Detail     string        `json:"detail"`
+}
+
+// McpSyncPreview：聚合预演结果。items 是确认可执行的清单（「看到的就
+// 是将要发生的」按此成立）；failedCreates 是条目构造失败的创建项——只告知
+// 不参与执行，确认执行集合由前端剔除对应格子；warnings 记录整条跳过的
+// 路径（文件读不出）与未知格子。
+type McpSyncPreview struct {
+	Items         []McpSyncPreviewItem `json:"items"`
+	FailedCreates []McpSyncPreviewItem `json:"failedCreates"`
+	Warnings      []string             `json:"warnings"`
+}
+
+// McpSyncItem：矩阵同步的逐格事实。
+type McpSyncItem struct {
+	ServerName string `json:"serverName"`
+	PathID     string `json:"pathId"`
+	Detail     string `json:"detail"`
+}
+
+// McpSyncResult：矩阵同步结果。failed 只收集不中断其余格子；warnings 同预演。
+type McpSyncResult struct {
+	Applied  []McpSyncItem `json:"applied"`
+	Removed  []McpSyncItem `json:"removed"`
+	Failed   []McpSyncItem `json:"failed"`
+	Warnings []string      `json:"warnings"`
+}
+
+// SkillPathCleanupPreview：删除技能路径的清理预演：将卸载的目录链接清单
+// （这些链接指向任意受管技能源）。
+type SkillPathCleanupPreview struct {
+	Links []SkillSyncItem `json:"links"`
+}
+
+// McpPathCleanupPreview：删除 MCP 路径的清理预演：将被移除的 MCP 条目名
+// （名字与 Reins 已配置 server 相同的条目）。
+type McpPathCleanupPreview struct {
+	ServerNames []string `json:"serverNames"`
 }
 
 // DiscoveredSkill：发现的一个 skill。
@@ -350,19 +424,12 @@ type BatchGitSkillImportResult struct {
 	Items          []BatchGitSkillImportItemResult `json:"items"`
 }
 
-// ProjectMutationInput：项目增改入参。
-type ProjectMutationInput struct {
-	ProjectID string   `json:"projectId"`
-	Path      string   `json:"path"`
-	Agents    []string `json:"agents"`
-}
-
-// SourceSyncInput：同步来源到一组 target 的统一入参（overwrite/sourceRoot/
+// SourceSyncInput：同步来源到一组技能路径的统一入参（overwrite/sourceRoot/
 // skills 可省略，serde(default) 语义）。
 type SourceSyncInput struct {
 	SourceID          string            `json:"sourceId"`
 	SkillPaths        []string          `json:"skillPaths"`
-	TargetIDs         []string          `json:"targetIds"`
+	PathIDs           []string          `json:"pathIds"`
 	OverwriteExisting bool              `json:"overwriteExisting,omitempty"`
 	SourceRoot        *string           `json:"sourceRoot,omitempty"`
 	Skills            []SyncSkillOption `json:"skills,omitempty"`
@@ -377,28 +444,25 @@ type SourceSyncResult struct {
 
 // SourceSyncConflict：同步冲突预演条目。
 type SourceSyncConflict struct {
-	SkillName       string        `json:"skillName"`
-	TargetID        AgentTargetID `json:"targetId"`
-	SourcePath      string        `json:"sourcePath"`
-	DestinationPath string        `json:"destinationPath"`
-	ExistingKind    string        `json:"existingKind"`
-	Detail          string        `json:"detail"`
+	SkillName       string `json:"skillName"`
+	PathID          string `json:"pathId"`
+	SourcePath      string `json:"sourcePath"`
+	DestinationPath string `json:"destinationPath"`
+	ExistingKind    string `json:"existingKind"`
+	Detail          string `json:"detail"`
 }
 
-// SyncTargetOption：同步弹窗的 target 候选（projectId/linkedTargetID/
-// skillDirLinkTarget 为「写 null」的 Option）。
-type SyncTargetOption struct {
-	ID                 string                 `json:"id"`
-	ProjectID          *string                `json:"projectId"`
-	AgentID            string                 `json:"agentId"`
-	Label              string                 `json:"label"`
-	SkillDir           string                 `json:"skillDir"`
-	LinkedTargetID     *string                `json:"linkedTargetId"`
-	SkillDirLinkTarget *string                `json:"skillDirLinkTarget"`
-	Links              []SkillLinkAssociation `json:"links"`
+// SyncPathOption：同步弹窗的技能路径候选（linkedPathID/dirLinkTarget 为
+// 「写 null」的 Option）。
+type SyncPathOption struct {
+	Name          string                 `json:"name"`
+	Dir           string                 `json:"dir"`
+	LinkedPathID  *string                `json:"linkedPathId"`
+	DirLinkTarget *string                `json:"dirLinkTarget"`
+	Links         []SkillLinkAssociation `json:"links"`
 }
 
-// SkillLinkAssociation：target skills 目录直接子项中发现的目录链接；实际
+// SkillLinkAssociation：技能路径目录直接子项中发现的目录链接；实际
 // 链接而非 config.yaml 才是安装状态的权威来源。
 type SkillLinkAssociation struct {
 	SkillName        string                `json:"skillName"`
@@ -439,39 +503,99 @@ type SkillSourceRefreshResult struct {
 }
 
 // ---------------------------------------------------------------------------
-// config.yaml 落盘形态（Raw*）：与 Rust serde 拼写一致——snake_case 键、
-// Option 无 skip 属性的写 null、空集合写 {} / []、RawSkillSourceConfig 经
-// 判别联合 flatten（type 内联）。nil 与空集合在 marshal 时归一（见
-// normalizeRawManagerConfig）。
+// config.yaml 落盘形态（Raw*）：snake_case 键、Option 无 skip 属性的写
+// null、空集合写 {} / []、RawSkillSourceConfig 经判别联合 flatten（type 内
+// 联）。nil 与空集合在 marshal 时归一（见 normalizeRawManagerConfig）。
 // ---------------------------------------------------------------------------
 
-// RawManagerConfig：config.yaml 的存储形态（user-editable）。
+// RawManagerConfig：config.yaml 的存储形态（user-editable）。旧 schema 的
+// targets/projects 键由 UnmarshalYAML 读入并就地迁移（决策记录
+// 2026-11-28-skill-and-mcp-paths.md 第 3 条），结构体不持有 legacy 字段、
+// 落盘永不写回。
 type RawManagerConfig struct {
-	Targets      map[string]*RawTargetConfig  `yaml:"targets" json:"targets"`
-	Projects     map[string]*RawProjectConfig `yaml:"projects" json:"projects"`
-	SkillSources []*RawSkillSourceConfig      `yaml:"skill_sources" json:"skillSources"`
-	Mcps         []*RawMcpConfig              `yaml:"mcps" json:"mcps"`
+	SkillPaths   map[string]*RawSkillPathConfig `yaml:"skill_paths" json:"skillPaths"`
+	McpPaths     map[string]*RawMcpPathConfig   `yaml:"mcp_paths" json:"mcpPaths"`
+	SkillSources []*RawSkillSourceConfig        `yaml:"skill_sources" json:"skillSources"`
+	Mcps         []*RawMcpConfig                `yaml:"mcps" json:"mcps"`
 }
 
-// RawProjectConfig：项目条目。
-type RawProjectConfig struct {
-	Path   string                            `yaml:"path" json:"path"`
-	Agents map[string]*RawProjectAgentConfig `yaml:"agents" json:"agents"`
+// UnmarshalYAML：新 schema 解析 + 旧 targets/projects 读时迁移。迁移规则：
+// 全局 target 拆成同名的技能路径与 MCP 路径各一条（MCP 段只有 config_path
+// 存在才迁），新键已存在的条目不被旧值覆盖；projects 丢弃。旧条目的
+// config_type 坏值按旧解析口径报错。
+func (c *RawManagerConfig) UnmarshalYAML(node *yaml.Node) error {
+	var raw struct {
+		SkillPaths   map[string]*RawSkillPathConfig `yaml:"skill_paths"`
+		McpPaths     map[string]*RawMcpPathConfig   `yaml:"mcp_paths"`
+		SkillSources []*RawSkillSourceConfig        `yaml:"skill_sources"`
+		Mcps         []*RawMcpConfig                `yaml:"mcps"`
+		Targets      map[string]*legacyTargetConfig `yaml:"targets"`
+		Projects     map[string]yaml.Node           `yaml:"projects"`
+	}
+	if err := node.Decode(&raw); err != nil {
+		return err
+	}
+	c.SkillPaths = raw.SkillPaths
+	c.McpPaths = raw.McpPaths
+	c.SkillSources = raw.SkillSources
+	c.Mcps = raw.Mcps
+	// 迁移可能向两个表写条目，而 YAML 缺键时 decode 出的是 nil map。
+	if c.SkillPaths == nil {
+		c.SkillPaths = map[string]*RawSkillPathConfig{}
+	}
+	if c.McpPaths == nil {
+		c.McpPaths = map[string]*RawMcpPathConfig{}
+	}
+
+	for _, id := range sortedKeys(raw.Targets) {
+		legacy := raw.Targets[id]
+		if _, exists := c.SkillPaths[id]; !exists {
+			c.SkillPaths[id] = &RawSkillPathConfig{Dir: legacy.SkillDir}
+		}
+		if legacy.Mcp.ConfigPath == nil {
+			continue
+		}
+		if _, exists := c.McpPaths[id]; exists {
+			continue
+		}
+		var configType *agents.McpConfigType
+		if legacy.Mcp.ConfigType != nil {
+			parsed, err := parseMcpConfigType(*legacy.Mcp.ConfigType)
+			if err != nil {
+				return err
+			}
+			configType = &parsed
+		}
+		c.McpPaths[id] = &RawMcpPathConfig{
+			ConfigPath:   legacy.Mcp.ConfigPath,
+			ConfigPrefix: legacy.Mcp.ConfigPrefix,
+			ConfigType:   configType,
+		}
+	}
+	return nil
 }
 
-// RawProjectAgentConfig：空占位对象。保留具名类型是为了序列化出 {}（而不
-// 是 null），同时让旧配置里遗留的 enabled 键被自然忽略。
-type RawProjectAgentConfig struct{}
-
-// RawTargetConfig：target 条目。
-type RawTargetConfig struct {
-	SkillDir string             `yaml:"skill_dir" json:"skillDir"`
-	Mcp      RawTargetMcpConfig `yaml:"mcp" json:"mcp"`
+// legacyTargetConfig：旧 targets 条目（2026-11-28 前的 schema），读入只为
+// 迁移，见 RawManagerConfig.UnmarshalYAML。
+type legacyTargetConfig struct {
+	SkillDir string          `yaml:"skill_dir"`
+	Mcp      legacyTargetMcp `yaml:"mcp"`
 }
 
-// RawTargetMcpConfig：target 的 MCP 段。三个 Option 都不带 skip 属性，
-// 落盘时未填写 null（与 serde 一致）。
-type RawTargetMcpConfig struct {
+type legacyTargetMcp struct {
+	ConfigPath   *string `yaml:"config_path"`
+	ConfigPrefix *string `yaml:"config_prefix"`
+	ConfigType   *string `yaml:"config_type"`
+}
+
+// RawSkillPathConfig：技能路径条目。
+type RawSkillPathConfig struct {
+	Dir string `yaml:"dir" json:"dir"`
+}
+
+// RawMcpPathConfig：MCP 路径条目。三个 Option 都不带 skip 属性，落盘时
+// 未填写 null（与 serde 一致）。
+type RawMcpPathConfig struct {
 	ConfigPath   *string               `yaml:"config_path" json:"configPath"`
 	ConfigPrefix *string               `yaml:"config_prefix" json:"configPrefix"`
 	ConfigType   *agents.McpConfigType `yaml:"config_type" json:"configType"`
@@ -479,7 +603,7 @@ type RawTargetMcpConfig struct {
 
 // UnmarshalYAML：raw 解析阶段即校验 config_type 取值（serde unknown
 // variant 语义：坏值在这里报错，而不是等到 writer 分发时静默错认）。
-func (c *RawTargetMcpConfig) UnmarshalYAML(node *yaml.Node) error {
+func (c *RawMcpPathConfig) UnmarshalYAML(node *yaml.Node) error {
 	var raw struct {
 		ConfigPath   *string `yaml:"config_path"`
 		ConfigPrefix *string `yaml:"config_prefix"`
@@ -758,41 +882,49 @@ func (c *RawMcpConfig) UnmarshalYAML(node *yaml.Node) error {
 	return nil
 }
 
-// RawTargetInput：target 增改入参（命令层散参组装）。
-type RawTargetInput struct {
-	TargetID   string
-	SkillDir   string
-	ConfigPath *string
+// RawSkillPathInput：技能路径增改入参（命令层散参组装）。
+type RawSkillPathInput struct {
+	Name string
+	Dir  string
+}
+
+// RawMcpPathInput：MCP 路径增改入参（命令层散参组装）。
+type RawMcpPathInput struct {
+	Name         string
+	ConfigPath   string
+	ConfigPrefix string
+	ConfigType   string
 }
 
 // ---------------------------------------------------------------------------
 // Resolved*：解析后的内存工作形态（BTreeMap → map + 显式排序，见
-// sortedKeys / targetRefs 的迭代口径）。
+// sortedKeys 的迭代口径）。
 // ---------------------------------------------------------------------------
 
 // ResolvedManagerConfig：解析完成的配置。
 type ResolvedManagerConfig struct {
-	Targets      map[AgentTargetID]*ResolvedTargetConfig
-	Projects     map[string]*ResolvedProjectConfig
+	SkillPaths   map[string]*ResolvedSkillPath
+	McpPaths     map[string]*ResolvedMcpPath
 	SkillSources map[string]*ResolvedSkillSourceDefinition
 	Mcps         []*ResolvedMcpConfig
 }
 
-// ResolvedProjectConfig：解析完成的项目。
-type ResolvedProjectConfig struct {
-	ID          string
-	ProjectPath string
-	Agents      map[AgentTargetID]*ResolvedTargetConfig
+// ResolvedSkillPath：解析完成的技能路径。
+type ResolvedSkillPath struct {
+	Name string
+	Dir  string
 }
 
-// ResolvedTargetConfig：解析完成的 target。
-type ResolvedTargetConfig struct {
-	ID              AgentTargetID
-	IsProject       bool
-	SkillDir        string
-	ConfigPath      *string
+// ResolvedMcpPath：解析完成的 MCP 路径。新模型下 ConfigPath 恒非 nil
+// （解析侧校验 config_path 必填）。
+type ResolvedMcpPath struct {
+	Name            string
+	ConfigPath      string
 	MCPConfigPrefix string
 	MCPConfigType   agents.McpConfigType
+	// SSEUnsupported：配置文件与声明了 SSE 不兼容的内置工具一致（解析时
+	// 判定一次）；视图据此下发，前端禁用 SSE server 的格子。
+	SSEUnsupported bool
 }
 
 // ResolvedSkillSourceDefinition：解析完成的来源定义。
@@ -855,24 +987,20 @@ func sortedKeys[V any](values map[string]V) []string {
 
 // normalizeRawManagerConfig：落盘前的 nil 集合归一。serde 的 BTreeMap/Vec
 // 空值序列化成 {} / []，Go 的 nil map/slice 会写 null——两者都是合法 YAML，
-// 但后者会让 config.yaml 与 Rust 版逐字节漂移。
+// 但后者会让 config.yaml 与 Rust 版逐字节漂移。legacy 键不在结构体上，
+// 天然永不写回。
 func normalizeRawManagerConfig(config *RawManagerConfig) *RawManagerConfig {
-	if config.Targets == nil {
-		config.Targets = map[string]*RawTargetConfig{}
+	if config.SkillPaths == nil {
+		config.SkillPaths = map[string]*RawSkillPathConfig{}
 	}
-	if config.Projects == nil {
-		config.Projects = map[string]*RawProjectConfig{}
+	if config.McpPaths == nil {
+		config.McpPaths = map[string]*RawMcpPathConfig{}
 	}
 	if config.SkillSources == nil {
 		config.SkillSources = []*RawSkillSourceConfig{}
 	}
 	if config.Mcps == nil {
 		config.Mcps = []*RawMcpConfig{}
-	}
-	for _, project := range config.Projects {
-		if project.Agents == nil {
-			project.Agents = map[string]*RawProjectAgentConfig{}
-		}
 	}
 	for _, mcp := range config.Mcps {
 		if mcp.Args == nil {

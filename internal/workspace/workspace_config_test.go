@@ -127,23 +127,22 @@ func TestDeleteSkillSourcesInnerRejectsEmptyInput(t *testing.T) {
 	}
 }
 
-func TestCreateWorkspaceTargetInnerWritesTargetToConfig(t *testing.T) {
-	_, root := newTestStore(t, "config-create-target")
+func TestCreateSkillPathInnerWritesEntryToConfig(t *testing.T) {
+	_, root := newTestStore(t, "config-create-skill-path")
 	store := NewWorkspaceConfigStoreAt(root)
 	store.inner.env = support.FromEnv(agents.Redirects())
-	writeFileT(t, store.ConfigPath(), "targets: {}\nprojects: {}\nskill_sources: []\nmcps: []\n")
+	writeFileT(t, store.ConfigPath(), "skill_paths: {}\nmcp_paths: {}\nskill_sources: []\nmcps: []\n")
 
-	result, err := CreateWorkspaceTargetInner(store, RawTargetInput{
-		TargetID:   "codex",
-		SkillDir:   filepath.Join(root, "codex-skills"),
-		ConfigPath: strPtr("~/.codex/config.toml"),
+	result, err := CreateSkillPathInner(store, RawSkillPathInput{
+		Name: "codex",
+		Dir:  filepath.Join(root, "codex-skills"),
 	})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
 
-	if string(result.TargetID) != "codex" {
-		t.Fatalf("target_id：%s", result.TargetID)
+	if result.PathID != "codex" {
+		t.Fatalf("path_id：%s", result.PathID)
 	}
 	if want := []string{store.ConfigPath()}; !equalStrings(result.UpdatedPaths, want) {
 		t.Fatalf("updated_paths：%v", result.UpdatedPaths)
@@ -153,24 +152,43 @@ func TestCreateWorkspaceTargetInnerWritesTargetToConfig(t *testing.T) {
 	if err := unmarshalRawManagerConfig(readFileT(t, store.ConfigPath()), &raw); err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	target, ok := raw.Targets["codex"]
+	path, ok := raw.SkillPaths["codex"]
 	if !ok {
-		t.Fatal("codex target exists")
+		t.Fatal("codex skill path exists")
 	}
-	if !strings.Contains(target.SkillDir, "codex-skills") {
-		t.Fatalf("skill_dir：%s", target.SkillDir)
+	if !strings.Contains(path.Dir, "codex-skills") {
+		t.Fatalf("dir：%s", path.Dir)
 	}
 }
 
-func TestCreateWorkspaceTargetInnerAllowsTargetWithoutMcpConfig(t *testing.T) {
-	_, root := newTestStore(t, "config-create-target-no-mcp")
+func TestCreateSkillPathInnerRejectsBlankDirAndDuplicateName(t *testing.T) {
+	_, root := newTestStore(t, "config-create-skill-path-invalid")
 	store := NewWorkspaceConfigStoreAt(root)
 	store.inner.env = support.FromEnv(agents.Redirects())
-	writeFileT(t, store.ConfigPath(), "targets: {}\nprojects: {}\nskill_sources: []\nmcps: []\n")
+	writeFileT(t, store.ConfigPath(), "skill_paths:\n  codex:\n    dir: codex/skills\nskill_sources: []\nmcps: []\n")
 
-	if _, err := CreateWorkspaceTargetInner(store, RawTargetInput{
-		TargetID: "pi",
-		SkillDir: filepath.Join(root, "pi-skills"),
+	if _, err := CreateSkillPathInner(store, RawSkillPathInput{Name: "codex", Dir: "another"}); err == nil {
+		t.Fatal("重复条目名必须报错")
+	}
+	if _, err := CreateSkillPathInner(store, RawSkillPathInput{Name: "other", Dir: "  "}); err == nil {
+		t.Fatal("空目录必须报错")
+	}
+	if _, err := CreateSkillPathInner(store, RawSkillPathInput{Name: "  ", Dir: "x"}); err == nil {
+		t.Fatal("空条目名必须报错")
+	}
+}
+
+// 预设名字的 MCP 路径：prefix 省略时按名字回落内置 defaults，落盘后
+// config_path + config_prefix 配套。
+func TestCreateMcpPathInnerDerivesPrefixFromDefaults(t *testing.T) {
+	_, root := newTestStore(t, "config-create-mcp-path-defaults")
+	store := NewWorkspaceConfigStoreAt(root)
+	store.inner.env = support.FromEnv(agents.Redirects())
+	writeFileT(t, store.ConfigPath(), "skill_paths: {}\nmcp_paths: {}\nskill_sources: []\nmcps: []\n")
+
+	if _, err := CreateMcpPathInner(store, RawMcpPathInput{
+		Name:       "codex",
+		ConfigPath: "~/.codex/config.toml",
 	}); err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -179,206 +197,148 @@ func TestCreateWorkspaceTargetInnerAllowsTargetWithoutMcpConfig(t *testing.T) {
 	if err := unmarshalRawManagerConfig(readFileT(t, store.ConfigPath()), &raw); err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	pi, ok := raw.Targets["pi"]
-	if !ok {
-		t.Fatal("pi target exists")
+	path := raw.McpPaths["codex"]
+	if path == nil || path.ConfigPrefix == nil || *path.ConfigPrefix != "mcp_servers" {
+		t.Fatalf("codex prefix 应为 mcp_servers：%+v", path)
 	}
-	if pi.Mcp.ConfigPath != nil || pi.Mcp.ConfigPrefix != nil {
-		t.Fatalf("无 MCP 的 target 不应写 mcp 字段：%+v", pi.Mcp)
-	}
-}
-
-func TestCreateWorkspaceTargetInnerRejectsNonBuiltinID(t *testing.T) {
-	_, root := newTestStore(t, "config-create-target-unknown-id")
-	store := NewWorkspaceConfigStoreAt(root)
-	store.inner.env = support.FromEnv(agents.Redirects())
-	writeFileT(t, store.ConfigPath(), "targets: {}\nprojects: {}\nskill_sources: []\nmcps: []\n")
-
-	_, err := CreateWorkspaceTargetInner(store, RawTargetInput{
-		TargetID: "cursor",
-		SkillDir: filepath.Join(root, "skills"),
-	})
-	if err == nil {
-		t.Fatal("非内置 target id 必须被拒绝")
-	}
-	if !strings.Contains(err.Error(), "仅支持创建内置工具的 target") {
-		t.Fatalf("错误信息需说明仅支持内置工具，got: %v", err)
-	}
-	var raw RawManagerConfig
-	if err := unmarshalRawManagerConfig(readFileT(t, store.ConfigPath()), &raw); err != nil {
-		t.Fatalf("parse: %v", err)
-	}
-	if len(raw.Targets) != 0 {
-		t.Fatalf("被拒绝的 create 不能写入文件：%+v", raw.Targets)
+	if path == nil || path.ConfigType == nil || *path.ConfigType != agents.McpConfigCommon {
+		t.Fatalf("codex config_type 应为 common：%+v", path)
 	}
 }
 
-// MCP 配置节点路径是各工具的固定知识，客户端不再传 prefix：create 时
-// 只有 prefix_required 的格式（codex/claude/opencode/common）才在 path
-// 缺失 + prefix 非空时报错；dsh 这类 prefix 不必填的格式允许无 MCP 配置。
-// 旧「codex 显式传 path 但 prefix 由客户端漏传」的失败用例已无意义——
-// prefix 现在由 defaults 自动填，落盘后 codex 的 path + mcp_servers
-// 是配套的合理状态。
-func TestCreateWorkspaceTargetInnerKeepsPrefixInSyncWithPath(t *testing.T) {
-	_, root := newTestStore(t, "config-create-target-mcp-pair")
+// 自定义名字的 MCP 路径：config_type 由创建时显式给定；prefix_required 的
+// 格式缺 prefix 报错，dsh/hermes 这类按结构定位的格式允许空 prefix。
+func TestCreateMcpPathInnerPrefixRulesFollowWriterContract(t *testing.T) {
+	_, root := newTestStore(t, "config-create-mcp-path-prefix")
 	store := NewWorkspaceConfigStoreAt(root)
 	store.inner.env = support.FromEnv(agents.Redirects())
-	writeFileT(t, store.ConfigPath(), "targets: {}\nprojects: {}\nskill_sources: []\nmcps: []\n")
+	writeFileT(t, store.ConfigPath(), "skill_paths: {}\nmcp_paths: {}\nskill_sources: []\nmcps: []\n")
 
-	// 显式传 path 时，prefix 由 defaults 派生（此处为 codex 的 mcp_servers），
-	// 落盘后两者配对——不再是错误。
-	if _, err := CreateWorkspaceTargetInner(store, RawTargetInput{
-		TargetID:   "codex",
-		SkillDir:   filepath.Join(root, "skills"),
-		ConfigPath: strPtr("~/.codex/config.toml"),
+	if _, err := CreateMcpPathInner(store, RawMcpPathInput{
+		Name:       "my-gateway",
+		ConfigPath: "gateway/config.json",
+		ConfigType: "common",
+	}); err == nil {
+		t.Fatal("common 格式缺 prefix 必须报错")
+	}
+
+	if _, err := CreateMcpPathInner(store, RawMcpPathInput{
+		Name:         "my-gateway",
+		ConfigPath:   "gateway/config.json",
+		ConfigType:   "common",
+		ConfigPrefix: "mcpServers",
 	}); err != nil {
-		t.Fatalf("create codex: %v", err)
-	}
-	var raw RawManagerConfig
-	if err := unmarshalRawManagerConfig(readFileT(t, store.ConfigPath()), &raw); err != nil {
-		t.Fatalf("parse: %v", err)
-	}
-	if got := raw.Targets["codex"].Mcp.ConfigPrefix; got == nil || *got != "mcp_servers" {
-		t.Fatalf("codex prefix 应为 mcp_servers：%+v", raw.Targets["codex"].Mcp.ConfigPrefix)
-	}
-	if got := raw.Targets["codex"].Mcp.ConfigType; got == nil || *got != agents.McpConfigCommon {
-		t.Fatalf("codex config_type 应为 common：%+v", raw.Targets["codex"].Mcp.ConfigType)
+		t.Fatalf("create common with prefix: %v", err)
 	}
 
-	// 隐式缺 path 时，create 不假设想要 MCP——prefix 留空，只有 dsh 这类
-	// prefix_required=false 的格式天然不报错；common 隐式缺 path 同样不报错
-	// （因 prefix 留空、prefix_required 校验无事可校）。
-	if _, err := CreateWorkspaceTargetInner(store, RawTargetInput{
-		TargetID: "zcode",
-		SkillDir: filepath.Join(root, "skills"),
-	}); err != nil {
-		t.Fatalf("create zcode: %v", err)
+	// hermes 已并入 common（YAML 载体由扩展名决定）：空 prefix 同样报错。
+	if _, err := CreateMcpPathInner(store, RawMcpPathInput{
+		Name:       "my-hermes",
+		ConfigPath: "hermes/config.yaml",
+		ConfigType: "common",
+	}); err == nil {
+		t.Fatal("common 载体的空 prefix 必须报错")
 	}
-	if err := unmarshalRawManagerConfig(readFileT(t, store.ConfigPath()), &raw); err != nil {
-		t.Fatalf("parse: %v", err)
-	}
-	if raw.Targets["zcode"].Mcp.ConfigPrefix != nil {
-		t.Fatalf("zcode prefix 应缺省：%+v", raw.Targets["zcode"].Mcp.ConfigPrefix)
-	}
-	if raw.Targets["zcode"].Mcp.ConfigPath != nil {
-		t.Fatalf("zcode config_path 应缺省：%+v", raw.Targets["zcode"].Mcp.ConfigPath)
+
+	if _, err := CreateMcpPathInner(store, RawMcpPathInput{
+		Name:       "missing-type",
+		ConfigPath: "x.json",
+		ConfigType: "nope",
+	}); err == nil {
+		t.Fatal("未知 config_type 必须报错")
 	}
 }
 
-// 收紧只影响新建：config.yaml 里已有的自定义 target 仍可照常编辑（改名/改路径）。
-func TestUpdateWorkspaceTargetInnerStillAcceptsExistingCustomID(t *testing.T) {
-	_, root := newTestStore(t, "config-update-custom-target")
+// update 保留存量 config_type：格式知识是创建时选定的，更新不换格式。
+func TestUpdateMcpPathInnerPreservesStoredConfigType(t *testing.T) {
+	_, root := newTestStore(t, "config-update-mcp-path-keeps-type")
 	store := NewWorkspaceConfigStoreAt(root)
 	store.inner.env = support.FromEnv(agents.Redirects())
-	gatewayConfigPath := filepath.Join(root, "gateway", "config.json")
-	writeFileT(t, store.ConfigPath(), fmt.Sprintf(`targets:
-  my-gateway:
-    skill_dir: %s
-    mcp:
-      config_path: %s
-      config_prefix: mcpServers
-      config_type: common
-projects: {}
-skill_sources: []
-mcps: []
-`, filepath.Join(root, "gateway-skills"), gatewayConfigPath))
-
-	result, err := UpdateWorkspaceTargetInner(store, "my-gateway", RawTargetInput{
-		TargetID:   "my-gateway-2",
-		SkillDir:   filepath.Join(root, "gateway-skills-v2"),
-		ConfigPath: strPtr(gatewayConfigPath),
-	})
-	if err != nil {
-		t.Fatalf("update: %v", err)
-	}
-
-	if string(result.TargetID) != "my-gateway-2" {
-		t.Fatalf("target_id：%s", result.TargetID)
-	}
-	var raw RawManagerConfig
-	if err := unmarshalRawManagerConfig(readFileT(t, store.ConfigPath()), &raw); err != nil {
-		t.Fatalf("parse: %v", err)
-	}
-	if _, ok := raw.Targets["my-gateway-2"]; !ok {
-		t.Fatal("my-gateway-2 exists")
-	}
-	if _, ok := raw.Targets["my-gateway"]; ok {
-		t.Fatal("my-gateway 应已改名")
-	}
-}
-
-// create 的 MCP 格式从 AgentSpec 派生落盘，客户端不传也不可信客户端。
-func TestCreateWorkspaceTargetInnerDerivesConfigTypeFromBuiltinDefaults(t *testing.T) {
-	_, root := newTestStore(t, "config-create-target-derives-type")
-	store := NewWorkspaceConfigStoreAt(root)
-	store.inner.env = support.FromEnv(agents.Redirects())
-	writeFileT(t, store.ConfigPath(), "targets: {}\nprojects: {}\nskill_sources: []\nmcps: []\n")
-
-	if _, err := CreateWorkspaceTargetInner(store, RawTargetInput{
-		TargetID:   "opencode",
-		SkillDir:   "skills",
-		ConfigPath: strPtr("opencode.json"),
-	}); err != nil {
-		t.Fatalf("create: %v", err)
-	}
-
-	var raw RawManagerConfig
-	if err := unmarshalRawManagerConfig(readFileT(t, store.ConfigPath()), &raw); err != nil {
-		t.Fatalf("parse: %v", err)
-	}
-	got := raw.Targets["opencode"].Mcp.ConfigType
-	if got == nil || *got != agents.McpConfigOpenCode {
-		t.Fatalf("config_type 应从 defaults 派生为 opencode：%+v", got)
-	}
-}
-
-// update 保留存量存储值：显式 config_type 原样保留，省略仍省略（解析时回落
-// defaults 的口径不变）；校验用有效类型与解析侧一致。
-func TestUpdateWorkspaceTargetInnerPreservesStoredConfigType(t *testing.T) {
-	_, root := newTestStore(t, "config-update-keeps-type")
-	store := NewWorkspaceConfigStoreAt(root)
-	store.inner.env = support.FromEnv(agents.Redirects())
-	writeFileT(t, store.ConfigPath(), `targets:
+	writeFileT(t, store.ConfigPath(), `mcp_paths:
   custom-dsh:
-    skill_dir: custom-dsh/skills
-    mcp:
-      config_path: custom/patch.yml
-      config_type: dsh
-  codex:
-    skill_dir: codex/skills
-    mcp:
-      config_path: codex/config.toml
-      config_prefix: mcp_servers
-projects: {}
+    config_path: custom/patch.yml
+    config_type: dsh
 skill_sources: []
 mcps: []
 `)
 
-	if _, err := UpdateWorkspaceTargetInner(store, "custom-dsh", RawTargetInput{
-		TargetID:   "custom-dsh",
-		SkillDir:   "custom-dsh/skills-v2",
-		ConfigPath: strPtr("custom/patch.yml"),
+	if _, err := UpdateMcpPathInner(store, "custom-dsh", RawMcpPathInput{
+		Name:       "custom-dsh-2",
+		ConfigPath: "custom/patch-v2.yml",
 	}); err != nil {
-		t.Fatalf("update dsh: %v", err)
-	}
-	if _, err := UpdateWorkspaceTargetInner(store, "codex", RawTargetInput{
-		TargetID:   "codex",
-		SkillDir:   "codex/skills-v2",
-		ConfigPath: strPtr("codex/config.toml"),
-	}); err != nil {
-		t.Fatalf("update codex: %v", err)
+		t.Fatalf("update: %v", err)
 	}
 
 	var raw RawManagerConfig
 	if err := unmarshalRawManagerConfig(readFileT(t, store.ConfigPath()), &raw); err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	dshType := raw.Targets["custom-dsh"].Mcp.ConfigType
-	if dshType == nil || *dshType != agents.McpConfigDsh {
-		t.Fatalf("显式存量 config_type 必须原样保留：%+v", dshType)
+	path, ok := raw.McpPaths["custom-dsh-2"]
+	if !ok {
+		t.Fatal("custom-dsh-2 exists")
 	}
-	if raw.Targets["codex"].Mcp.ConfigType != nil {
-		t.Fatalf("省略的 config_type 必须保持省略（解析回落 defaults）：%+v", raw.Targets["codex"].Mcp.ConfigType)
+	if path.ConfigType == nil || *path.ConfigType != agents.McpConfigDsh {
+		t.Fatalf("存量 config_type 必须原样保留：%+v", path.ConfigType)
+	}
+}
+
+func TestUpdateSkillPathInnerRenamesEntry(t *testing.T) {
+	_, root := newTestStore(t, "config-update-skill-path")
+	store := NewWorkspaceConfigStoreAt(root)
+	store.inner.env = support.FromEnv(agents.Redirects())
+	writeFileT(t, store.ConfigPath(), "skill_paths:\n  old-name:\n    dir: old/skills\nskill_sources: []\nmcps: []\n")
+
+	result, err := UpdateSkillPathInner(store, "old-name", RawSkillPathInput{
+		Name: "new-name",
+		Dir:  "new/skills",
+	})
+	if err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if result.PathID != "new-name" {
+		t.Fatalf("path_id：%s", result.PathID)
+	}
+
+	var raw RawManagerConfig
+	if err := unmarshalRawManagerConfig(readFileT(t, store.ConfigPath()), &raw); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if _, ok := raw.SkillPaths["new-name"]; !ok {
+		t.Fatal("new-name exists")
+	}
+	if _, ok := raw.SkillPaths["old-name"]; ok {
+		t.Fatal("old-name 应已改名")
+	}
+}
+
+func TestDeleteSkillPathInnerRemovesEntryAndKeepsForeignContent(t *testing.T) {
+	_, root := newTestStore(t, "config-delete-skill-path")
+	store := NewWorkspaceConfigStoreAt(root)
+	store.inner.env = support.FromEnv(agents.Redirects())
+	writeFileT(t, store.ConfigPath(), "skill_paths:\n  mine:\n    dir: mine/skills\nskill_sources: []\nmcps: []\n")
+	if err := os.MkdirAll(filepath.Join(root, "mine", "skills", "user-skill"), 0o777); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	// cleanup=false：目录里的真实内容原样保留。
+	if _, err := DeleteSkillPathInner(store, "mine", false); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	var raw RawManagerConfig
+	if err := unmarshalRawManagerConfig(readFileT(t, store.ConfigPath()), &raw); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(raw.SkillPaths) != 0 {
+		t.Fatalf("条目应已删除：%+v", raw.SkillPaths)
+	}
+	if _, err := os.Stat(filepath.Join(root, "mine", "skills", "user-skill")); err != nil {
+		t.Fatalf("cleanup=false 不得动盘上内容：%v", err)
+	}
+
+	// 再删除一次：不存在的条目报稳定错误。
+	if _, err := DeleteSkillPathInner(store, "mine", false); err == nil ||
+		!strings.Contains(err.Error(), "技能路径不存在：mine") {
+		t.Fatalf("error：%v", err)
 	}
 }
 
@@ -484,8 +444,9 @@ func TestFirstLoadBootstrapsTemplateThatParses(t *testing.T) {
 	if !document.Validation.Valid {
 		t.Fatalf("bootstrapped template must parse：%+v", document.Validation)
 	}
-	if document.Config == nil || len(document.Config.Targets) != 6 {
-		t.Fatalf("template targets：%+v", document.Config)
+	// 新装空开始：模板不预置任何条目（决策记录第 4 条）。
+	if document.Config == nil || len(document.Config.SkillPaths) != 0 || len(document.Config.McpPaths) != 0 {
+		t.Fatalf("template must start empty：%+v", document.Config)
 	}
 
 	again, err := store.LoadDocument()
@@ -498,8 +459,8 @@ func TestFirstLoadBootstrapsTemplateThatParses(t *testing.T) {
 	if !again.Exists || !again.Validation.Valid {
 		t.Fatalf("二次读取应有效：%+v", again.Validation)
 	}
-	if again.Config == nil || len(again.Config.Targets) != 6 {
-		t.Fatalf("二次读取 targets：%+v", again.Config)
+	if again.Config == nil || len(again.Config.SkillPaths) != 0 || len(again.Config.McpPaths) != 0 {
+		t.Fatalf("二次读取应保持空开始：%+v", again.Config)
 	}
 }
 

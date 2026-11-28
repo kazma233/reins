@@ -103,7 +103,7 @@ func TestSkillSourceConfigViewOptionalFieldsOmittedWhenUnset(t *testing.T) {
 	}
 }
 
-// SkillLinkState 是前端契约里唯一的 camelCase 枚举；McpTargetState 是
+// SkillLinkState 是前端契约里唯一的 camelCase 枚举；McpPathState 是
 // snake_case。拼写漂移会让前端 narrow 失效。
 func TestEnumWireSpellings(t *testing.T) {
 	states := map[SkillLinkState]string{
@@ -122,19 +122,18 @@ func TestEnumWireSpellings(t *testing.T) {
 		}
 	}
 
-	targetStates := map[McpTargetState]string{
-		TargetStatePresent:      `"present"`,
-		TargetStateMissing:      `"missing"`,
-		TargetStateError:        `"error"`,
-		TargetStateUnconfigured: `"unconfigured"`,
+	pathStates := map[McpPathState]string{
+		PathStatePresent: `"present"`,
+		PathStateMissing: `"missing"`,
+		PathStateError:   `"error"`,
 	}
-	for value, want := range targetStates {
+	for value, want := range pathStates {
 		encoded, err := json.Marshal(value)
 		if err != nil {
 			t.Fatalf("marshal %s: %v", value, err)
 		}
 		if string(encoded) != want {
-			t.Fatalf("McpTargetState 拼写漂移：%s != %s", encoded, want)
+			t.Fatalf("McpPathState 拼写漂移：%s != %s", encoded, want)
 		}
 	}
 
@@ -151,24 +150,6 @@ func TestEnumWireSpellings(t *testing.T) {
 		if string(encoded) != want {
 			t.Fatalf("McpTransport 拼写漂移：%s != %s", encoded, want)
 		}
-	}
-}
-
-// AgentTargetId 在 wire 上就是字符串（Rust newtype 自定义 Serialize）。
-func TestAgentTargetIDSerializesAsString(t *testing.T) {
-	encoded, err := json.Marshal(AgentTargetID("codex"))
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	if string(encoded) != `"codex"` {
-		t.Fatalf("got %s", encoded)
-	}
-	var decoded AgentTargetID
-	if err := json.Unmarshal([]byte(`"codex"`), &decoded); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if decoded != "codex" {
-		t.Fatalf("got %s", decoded)
 	}
 }
 
@@ -227,6 +208,7 @@ func TestMcpConfigTypeSpellings(t *testing.T) {
 		agents.McpConfigOpenCode:  "opencode",
 		agents.McpConfigGrokBuild: "grokbuild",
 		agents.McpConfigDsh:       "dsh",
+		agents.McpConfigHermes:    "hermes",
 	}
 	for value, want := range spellings {
 		if string(value) != want {

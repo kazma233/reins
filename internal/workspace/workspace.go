@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"sort"
 	"strings"
 	"time"
 
@@ -68,25 +67,20 @@ func documentFromContent(store *WorkspaceConfigStore, configPath string, rawCont
 
 func configToView(store *WorkspaceConfigStore, config *ResolvedManagerConfig) *WorkspaceConfigView {
 	view := &WorkspaceConfigView{
-		Targets:      make([]TargetConfigView, 0, len(config.Targets)),
+		SkillPaths:   make([]SkillPathView, 0, len(config.SkillPaths)),
+		McpPaths:     make([]McpPathView, 0, len(config.McpPaths)),
 		SkillSources: make([]SkillSourceConfigView, 0, len(config.SkillSources)),
 		Mcps:         make([]McpConfigView, 0, len(config.Mcps)),
-		Projects:     make([]ProjectConfigView, 0, len(config.Projects)),
 	}
-	for _, id := range sortedTargetIDs(config.Targets) {
-		view.Targets = append(view.Targets, targetToView(config.Targets[id]))
-	}
-	for _, projectID := range sortedKeys(config.Projects) {
-		project := config.Projects[projectID]
-		agentsView := make([]TargetConfigView, 0, len(project.Agents))
-		for _, agentID := range sortedTargetIDs(project.Agents) {
-			agentsView = append(agentsView, targetToView(project.Agents[agentID]))
-		}
-		view.Projects = append(view.Projects, ProjectConfigView{
-			ID:     project.ID,
-			Path:   support.DisplayPath(project.ProjectPath),
-			Agents: agentsView,
+	for _, name := range sortedKeys(config.SkillPaths) {
+		path := config.SkillPaths[name]
+		view.SkillPaths = append(view.SkillPaths, SkillPathView{
+			Name: name,
+			Dir:  support.DisplayPath(path.Dir),
 		})
+	}
+	for _, name := range sortedKeys(config.McpPaths) {
+		view.McpPaths = append(view.McpPaths, mcpPathToView(config.McpPaths[name]))
 	}
 	for _, id := range sortedKeys(config.SkillSources) {
 		source := config.SkillSources[id]
@@ -133,27 +127,22 @@ func configToView(store *WorkspaceConfigStore, config *ResolvedManagerConfig) *W
 	return view
 }
 
-func targetToView(target *ResolvedTargetConfig) TargetConfigView {
-	writer := mcpFormatWriterFor(target.MCPConfigType)
-	var configPath *string
-	if target.ConfigPath != nil {
-		displayed := support.DisplayPath(*target.ConfigPath)
-		configPath = &displayed
-	}
+func mcpPathToView(path *ResolvedMcpPath) McpPathView {
+	writer := mcpFormatWriterFor(path.MCPConfigType)
 	// 示例生成失败（序列化异常）时留空，前端隐藏示例区——说明行仍在。
 	examples := make([]McpFormatExample, 0)
-	if shaped, err := writer.shapeExamples(target.MCPConfigPrefix, "my-server"); err == nil {
+	if shaped, err := writer.shapeExamples(path.MCPConfigPrefix, "my-server"); err == nil {
 		for _, example := range shaped {
 			examples = append(examples, McpFormatExample{Label: example.label, Body: example.body})
 		}
 	}
-	return TargetConfigView{
-		ID:                   target.ID,
-		SkillDir:             support.DisplayPath(target.SkillDir),
-		ConfigPath:           configPath,
-		MCPConfigPrefix:      target.MCPConfigPrefix,
+	return McpPathView{
+		Name:                 path.Name,
+		ConfigPath:           support.DisplayPath(path.ConfigPath),
+		ConfigPrefix:         path.MCPConfigPrefix,
 		MCPFormatDescription: writer.description(),
 		MCPFormatExamples:    examples,
+		SSEUnsupported:       path.SSEUnsupported,
 	}
 }
 
@@ -178,72 +167,89 @@ func parseManagerConfig(rawContent string, configPath string, env *support.Envir
 	if err := yaml.Unmarshal([]byte(rawContent), &raw); err != nil {
 		return nil, fmt.Errorf("YAML 解析失败：%s：%v", configPath, err)
 	}
-	targets := map[AgentTargetID]*ResolvedTargetConfig{}
+	skillPaths := map[string]*ResolvedSkillPath{}
+	mcpPaths := map[string]*ResolvedMcpPath{}
 	skillSources := map[string]*ResolvedSkillSourceDefinition{}
 
-	builtinDefaults := builtinTargetDefaultsMap(env)
+	skillDefaults := builtinSkillPathDefaultsMap(env)
+	mcpDefaults := builtinMcpPathDefaultsMap(env)
+	sseUnsupported := sseUnsupportedConfigPaths(env)
 
 	configBaseDir := filepath.Dir(configPath)
-	for _, rawID := range sortedKeys(raw.Targets) {
-		rawTarget := raw.Targets[rawID]
-		id, err := normalizeTargetID(rawID)
-		if err != nil {
-			return nil, err
+	for _, rawName := range sortedKeys(raw.SkillPaths) {
+		name := strings.TrimSpace(rawName)
+		if name == "" {
+			return nil, errors.New("发现空的 skill path 条目名。")
 		}
-		defaults, hasDefaults := builtinDefaults[id]
-		skillDirRaw := strings.TrimSpace(rawTarget.SkillDir)
-		var skillDir string
+		rawPath := raw.SkillPaths[rawName]
+		dirRaw := strings.TrimSpace(rawPath.Dir)
+		var dir string
 		switch {
-		case skillDirRaw != "":
-			skillDir, err = expandPath(skillDirRaw, configBaseDir)
+		case dirRaw != "":
+			expanded, err := expandPath(dirRaw, configBaseDir)
 			if err != nil {
 				return nil, err
 			}
-		case hasDefaults:
-			skillDir = defaults.SkillDir
+			dir = expanded
+		case skillDefaults[name].Dir != "":
+			// 空目录按名字回落内置 defaults：旧模板的「留空跟随环境重定向」
+			// 用法（如 grokbuild）迁移后保持语义。
+			dir = skillDefaults[name].Dir
 		default:
-			return nil, fmt.Errorf("目标 %s 的 skill_dir 不能为空。", id)
+			return nil, fmt.Errorf("技能路径 %s 的 dir 不能为空。", name)
 		}
-		var configFile_path *string
-		if rawTarget.Mcp.ConfigPath != nil {
-			expanded, err := expandPath(*rawTarget.Mcp.ConfigPath, configBaseDir)
+		skillPaths[name] = &ResolvedSkillPath{Name: name, Dir: dir}
+	}
+
+	for _, rawName := range sortedKeys(raw.McpPaths) {
+		name := strings.TrimSpace(rawName)
+		if name == "" {
+			return nil, errors.New("发现空的 mcp path 条目名。")
+		}
+		rawPath := raw.McpPaths[rawName]
+		defaults, hasDefaults := mcpDefaults[name]
+		var expanded string
+		switch {
+		case rawPath.ConfigPath != nil && strings.TrimSpace(*rawPath.ConfigPath) != "":
+			result, err := expandPath(*rawPath.ConfigPath, configBaseDir)
 			if err != nil {
 				return nil, err
 			}
-			configFile_path = &expanded
-		} else if hasDefaults && defaults.ConfigPath != nil {
-			pathCopy := *defaults.ConfigPath
-			configFile_path = &pathCopy
+			expanded = result
+		case hasDefaults && defaults.ConfigPath != "":
+			// 省略 config_path 按名字回落内置 defaults：跟随环境重定向的
+			// 用法（如 grokbuild）与技能路径的空目录回落同语义。
+			expanded = defaults.ConfigPath
+		default:
+			return nil, fmt.Errorf("MCP 路径 %s 的 config_path 不能为空。", name)
 		}
 		prefix := ""
-		if rawTarget.Mcp.ConfigPrefix != nil {
-			prefix = *rawTarget.Mcp.ConfigPrefix
+		if rawPath.ConfigPrefix != nil {
+			prefix = *rawPath.ConfigPrefix
 		} else if hasDefaults {
 			prefix = defaults.ConfigPrefix
 		}
 		prefix = strings.TrimSpace(prefix)
 		configType := agents.McpConfigCommon
 		switch {
-		case rawTarget.Mcp.ConfigType != nil:
-			configType = *rawTarget.Mcp.ConfigType
+		case rawPath.ConfigType != nil:
+			configType = *rawPath.ConfigType
 		case hasDefaults:
 			configType = defaults.ConfigType
 		}
 
-		// 与 normalizeRawTargetInput 的契约一致：configPrefix 只在真正有 MCP
-		// 配置文件可写时才必填（不需要 MCP 的 target 两者皆空）。dsh 按
-		// name+serverName 定位条目（writer 声明 prefix 不必填），允许留空。
-		if configFile_path != nil && prefix == "" && mcpFormatWriterFor(configType).prefixRequired() {
-			return nil, fmt.Errorf("目标 %s 的 mcp.config_prefix 不能为空。", id)
+		// configPrefix 只在 writer 声明必填时才要求（dsh/hermes 按文件结构
+		// 定位条目，允许空 prefix）。
+		if prefix == "" && mcpFormatWriterFor(configType).prefixRequired() {
+			return nil, fmt.Errorf("MCP 路径 %s 的 config_prefix 不能为空。", name)
 		}
 
-		targets[id] = &ResolvedTargetConfig{
-			ID:              id,
-			IsProject:       false,
-			SkillDir:        skillDir,
-			ConfigPath:      configFile_path,
+		mcpPaths[name] = &ResolvedMcpPath{
+			Name:            name,
+			ConfigPath:      expanded,
 			MCPConfigPrefix: prefix,
 			MCPConfigType:   configType,
+			SSEUnsupported:  sseUnsupported[strings.ToLower(support.DisplayPath(expanded))],
 		}
 	}
 
@@ -301,213 +307,63 @@ func parseManagerConfig(rawContent string, configPath string, env *support.Envir
 			}
 		}
 
-		mcps = append(mcps, &ResolvedMcpConfig{
-			Name:      name,
-			Transport: mcp.Transport,
-			CreatedAt: mcp.CreatedAt,
-			Homepage:  mcp.Homepage,
-			Command:   mcp.Command,
-			Args:      mcp.Args,
-			Env:       mcp.Env,
-			URL:       mcp.URL,
-			Headers:   mcp.Headers,
-			Timeout:   mcp.Timeout,
-		})
-	}
-
-	projects := map[string]*ResolvedProjectConfig{}
-	for _, projectID := range sortedKeys(raw.Projects) {
-		rawProject := raw.Projects[projectID]
-		projectIDTrimmed := strings.TrimSpace(projectID)
-		if projectIDTrimmed == "" {
-			return nil, errors.New("发现空的 project id。")
-		}
-		if err := validateProjectID(projectIDTrimmed); err != nil {
-			return nil, err
-		}
-		projectPath, err := expandPath(rawProject.Path, configBaseDir)
-		if err != nil {
-			return nil, err
-		}
-		agentDefaults := projectAgentDefaults(projectPath)
-		agentsMap := map[AgentTargetID]*ResolvedTargetConfig{}
-		for _, agentName := range sortedKeys(rawProject.Agents) {
-			agentID, err := normalizeTargetID(agentName)
-			if err != nil {
-				return nil, err
-			}
-			var defaults *TargetDefaults
-			for i := range agentDefaults {
-				if agentDefaults[i].ID == agentID {
-					defaults = &agentDefaults[i]
-					break
-				}
-			}
-			// 回退落点用规范化后的 id：`agent_name` 是 YAML 原文（可能是
-			// `Codex`），用它拼路径会造出一个 `Codex/skills` 空目录，与工具
-			// 实际读的位置不一致。
-			skillDir := filepath.Join(projectPath, string(agentID), "skills")
-			var configPathPtr *string
-			prefix := ""
-			configType := agents.McpConfigCommon
-			if defaults != nil {
-				skillDir = defaults.SkillDir
-				if defaults.ConfigPath != nil {
-					pathCopy := *defaults.ConfigPath
-					configPathPtr = &pathCopy
-				}
-				prefix = defaults.ConfigPrefix
-				configType = defaults.ConfigType
-			}
-			agentsMap[agentID] = &ResolvedTargetConfig{
-				ID:              agentID,
-				IsProject:       true,
-				SkillDir:        skillDir,
-				ConfigPath:      configPathPtr,
-				MCPConfigPrefix: prefix,
-				MCPConfigType:   configType,
-			}
-		}
-		projects[projectIDTrimmed] = &ResolvedProjectConfig{
-			ID:          projectIDTrimmed,
-			ProjectPath: projectPath,
-			Agents:      agentsMap,
-		}
+		mcps = append(mcps, resolveRawMcp(name, mcp))
 	}
 
 	return &ResolvedManagerConfig{
-		Targets:      targets,
-		Projects:     projects,
+		SkillPaths:   skillPaths,
+		McpPaths:     mcpPaths,
 		SkillSources: skillSources,
 		Mcps:         mcps,
 	}, nil
+}
+
+// resolveRawMcp：raw MCP 条目 → 解析形态（映射只此一份：解析侧与改名手术
+// 共用；名字由调用方给出——解析侧传归一后的条目名，手术侧传改名目标）。
+func resolveRawMcp(name string, raw *RawMcpConfig) *ResolvedMcpConfig {
+	return &ResolvedMcpConfig{
+		Name:      name,
+		Transport: raw.Transport,
+		CreatedAt: raw.CreatedAt,
+		Homepage:  raw.Homepage,
+		Command:   raw.Command,
+		Args:      raw.Args,
+		Env:       raw.Env,
+		URL:       raw.URL,
+		Headers:   raw.Headers,
+		Timeout:   raw.Timeout,
+	}
 }
 
 // ---------------------------------------------------------------------------
 // 默认 config.yaml 模板
 // ---------------------------------------------------------------------------
 
-// templateTarget：默认模板的一个 target 条目（从 agents 清单构造再渲染）。
-// 注释与字段省略是模板契约的一部分（留空 = 解析时回落 builtin defaults）。
-type templateTarget struct {
-	id            string
-	note          string
-	skillDir      string
-	mcpConfigPath *string
-	configPrefix  string
-	configTypeKey string
-}
-
-// DefaultConfigTemplate：生成默认 config.yaml。支持 env 重定向的工具
-// （grokbuild / pi / codex / claude / dsh）在生成模板时解析并固化具体路径；
-// 之后以 config.yaml 里写入的路径为准，环境变量变化不再跟随。默认场景沿用
-// ~ 前缀写法，与模板其他条目风格一致。
-func DefaultConfigTemplate(env *support.Environment) string {
-	targets := templateTargets(env)
-
+// DefaultConfigTemplate：生成默认 config.yaml。新装空开始（决策记录
+// 2026-11-28-skill-and-mcp-paths.md 第 4 条）：不预置任何工具条目，落点由
+// 用户从创建弹窗的预设里挑（预设值由后端按 agents 清单实时解析下发），或
+// 手写任意路径。空集合写显式形态，与 normalizeRawManagerConfig 的落盘
+// 口径一致。
+func DefaultConfigTemplate() string {
 	var out strings.Builder
-	out.WriteString("targets:\n")
-	for index, target := range targets {
-		if index > 0 {
-			out.WriteString("\n")
-		}
-		if target.note != "" {
-			fmt.Fprintf(&out, "  # %s\n", target.note)
-		}
-		fmt.Fprintf(&out, "  %s:\n", target.id)
-		fmt.Fprintf(&out, "    skill_dir: %s\n", target.skillDir)
-		out.WriteString("    mcp:\n")
-		if target.mcpConfigPath != nil {
-			fmt.Fprintf(&out, "      config_path: %s\n", *target.mcpConfigPath)
-		}
-		fmt.Fprintf(&out, "      config_prefix: %s\n", target.configPrefix)
-		fmt.Fprintf(&out, "      config_type: %s\n", target.configTypeKey)
-	}
-
-	out.WriteString("\nmcps: []\n\n# projects:\n#   my-app:\n#     path: ~/code/my-app\n#     agents:\n#       claude: {}\n#       codex: {}\n#       opencode: {}\n#       zcode: {}\n#       grokbuild: {}\n")
+	out.WriteString("# 技能路径：接受 skills 分发的命名目录条目；从界面「添加」选择预设（按工具预填）或自定义任意目录。\n")
+	out.WriteString("skill_paths: {}\n\n")
+	out.WriteString("# MCP 路径：接受 MCP 分发的命名条目（配置文件路径 + 格式 + 前缀），与技能路径互不约束。\n")
+	out.WriteString("mcp_paths: {}\n\n")
+	out.WriteString("skill_sources: []\n\n")
+	out.WriteString("mcps: []\n")
 	return out.String()
-}
-
-func templateTargets(env *support.Environment) []templateTarget {
-	var targets []templateTarget
-	for i := range agents.AgentSpecs {
-		spec := &agents.AgentSpecs[i]
-		targetID := spec.TargetID
-		if targetID == "" {
-			continue
-		}
-		switch spec.Template {
-		case agents.TemplateAbsent:
-			continue
-		case agents.TemplateStandard:
-			entry := templateTarget{
-				id:            targetID,
-				skillDir:      templateGlobalPath(env, spec.Global.Root, spec.Global.SkillDir),
-				configPrefix:  spec.Mcp.Prefix,
-				configTypeKey: string(spec.Mcp.ConfigType),
-			}
-			if spec.Global.McpConfigPath != "" {
-				path := templateGlobalPath(env, spec.Global.Root, spec.Global.McpConfigPath)
-				entry.mcpConfigPath = &path
-			}
-			targets = append(targets, entry)
-		case agents.TemplateFollowEnv:
-			rootPrefix := spec.Global.Root.HomePrefix()
-			note := fmt.Sprintf(
-				"留空路径以跟随 %s；默认 %s/%s 和 %s/%s。",
-				spec.Global.Root.Redirect.EnvVar,
-				rootPrefix, spec.Global.SkillDir,
-				rootPrefix, spec.Global.McpConfigPath,
-			)
-			targets = append(targets, templateTarget{
-				id:            targetID,
-				note:          note,
-				skillDir:      `""`,
-				configPrefix:  spec.Mcp.Prefix,
-				configTypeKey: string(spec.Mcp.ConfigType),
-			})
-		}
-	}
-	return targets
-}
-
-// templateGlobalPath：模板里的全局路径写法。先按解析口径求出真实落点，再
-// 折回 ~ 缩写。解析只有 GlobalRoot.ResolvePath 一处（与 target defaults 同
-// 一个函数），所以「模板写出的路径」与「解析后的路径」必然一致；root 被
-// env 重定向时求出的绝对路径不是 HOME 子路径，显示为绝对路径。模板是写给
-// 用户与 reins 解析器共用的文本，分隔符统一用 /，Windows 上不混入反斜杠
-// （解析端两种分隔符都接受）。
-func templateGlobalPath(env *support.Environment, root agents.GlobalRoot, rel string) string {
-	resolved, ok := root.ResolvePath(env, rel)
-	if !ok {
-		return fmt.Sprintf("%s/%s", root.HomePrefix(), rel)
-	}
-	// 落在 HOME 下就折回 ~ 缩写（含 home 自身），否则写绝对路径——后者正是
-	// root 被 env 重定向时的形态，用户能一眼看出该工具不受 HOME 影响。
-	if env.Home != "" {
-		if relative, found := stripPathPrefix(resolved, env.Home); found {
-			if relative == "" {
-				return "~"
-			}
-			return "~/" + strings.ReplaceAll(relative, "\\", "/")
-		}
-	}
-	return strings.ReplaceAll(resolved, "\\", "/")
 }
 
 // ---------------------------------------------------------------------------
 // 路径选择器（经 DialogPort 注入，由 Wails app.Dialog 实现）
 // ---------------------------------------------------------------------------
 
-func SelectProjectPathInner(dialog DialogPort, path *string) (*WorkspaceSelection, error) {
-	return pickFolder(dialog, path)
-}
-
 func SelectLocalSkillSourceDirectoryInner(dialog DialogPort, path *string) (*WorkspaceSelection, error) {
 	return pickFolder(dialog, path)
 }
 
-func SelectTargetSkillDirectoryInner(dialog DialogPort, path *string) (*WorkspaceSelection, error) {
+func SelectSkillPathDirectoryInner(dialog DialogPort, path *string) (*WorkspaceSelection, error) {
 	return pickFolder(dialog, path)
 }
 
@@ -530,7 +386,7 @@ func SelectSkillBatchImportFileInner(dialog DialogPort) (*SkillBatchImportFile, 
 	}, nil
 }
 
-func SelectTargetMCPConfigFileInner(dialog DialogPort, path *string) (*WorkspaceSelection, error) {
+func SelectMcpPathConfigFileInner(dialog DialogPort, path *string) (*WorkspaceSelection, error) {
 	options := DialogOptions{}
 	if path != nil && strings.TrimSpace(*path) != "" {
 		expanded, err := expandPath(*path, "")
@@ -749,35 +605,6 @@ func normalizeSourceDescription(description *string) *string {
 	return &trimmed
 }
 
-// validateProjectID：project id 是用户可见标识，也是复合地址 `project:agent`
-// 的前半段：含 `:` 会让地址不可拆（前后端都按第一个冒号切），含 `/`、`\` 会
-// 破坏前端按展示 label 分组、且 Windows 反斜杠路径混进来必然不是标识。
-// 校验只有这一处，写入与解析两侧都调用。
-func validateProjectID(value string) error {
-	if strings.ContainsAny(value, `:/\`) {
-		return fmt.Errorf("project id 不能包含 `:`、`/` 或 `\\`：%s", value)
-	}
-	return nil
-}
-
-// normalizeTargetID：小写、下划线折连字符、open-code 别名归一、字符集校验。
-func normalizeTargetID(value string) (AgentTargetID, error) {
-	trimmed := strings.ToLower(strings.TrimSpace(value))
-	trimmed = strings.ReplaceAll(trimmed, "_", "-")
-	if trimmed == "open-code" {
-		trimmed = "opencode"
-	}
-	if trimmed == "" {
-		return "", errors.New("target id 不能为空。")
-	}
-	for _, ch := range trimmed {
-		if (ch < 'a' || ch > 'z') && (ch < '0' || ch > '9') && ch != '-' {
-			return "", fmt.Errorf("target id 只能包含小写字母、数字和 - ：%s", strings.TrimSpace(value))
-		}
-	}
-	return AgentTargetID(trimmed), nil
-}
-
 // stringOrEmpty：写 null 的 Option 的读取侧（nil → ""）。
 func stringOrEmpty(value *string) string {
 	if value == nil {
@@ -798,14 +625,4 @@ func cloneStringMap(values map[string]string) map[string]string {
 		cloned[key] = value
 	}
 	return cloned
-}
-
-// sortedTargetIDs：AgentTargetID 键 map 的 BTreeMap 迭代序。
-func sortedTargetIDs(values map[AgentTargetID]*ResolvedTargetConfig) []AgentTargetID {
-	keys := make([]AgentTargetID, 0, len(values))
-	for key := range values {
-		keys = append(keys, key)
-	}
-	sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
-	return keys
 }

@@ -119,7 +119,7 @@ func (s *WorkspaceConfigStore) LoadDocument() (*WorkspaceConfigDocument, error) 
 		}
 		rawContent = string(content)
 	} else {
-		rawContent = DefaultConfigTemplate(s.inner.env)
+		rawContent = DefaultConfigTemplate()
 		if err := support.WriteAtomic(configPath, rawContent); err != nil {
 			return nil, err
 		}

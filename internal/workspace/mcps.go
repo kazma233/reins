@@ -1,6 +1,7 @@
-// mcps.go：MCP 域编排——config.yaml 的 MCP server CRUD + 跨格式的 per-target
-// MCP 配置写入（JSON / TOML / dsh Cordis patch YAML）。各 config type 的条目
-// 形态与约束在 mcp_formats.go；本文件持有文件解析、前缀导航与 JSON/TOML 引擎。
+// mcps.go：MCP 域编排——config.yaml 的 MCP server CRUD + 跨格式的 per-path
+// MCP 配置写入（JSON / TOML / dsh Cordis patch YAML / hermes YAML）。各
+// config type 的条目形态与约束在 mcp_formats.go；本文件持有文件解析、
+// 前缀导航与 JSON/TOML 引擎。
 package workspace
 
 import (
@@ -17,104 +18,75 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// MCP apply / preview / remove（config-path 写入目标）
+// 「一个 server × 一条路径」的格子操作（矩阵同步逐格执行与测试共用）
 // ---------------------------------------------------------------------------
 
-// ApplyMCPToTargetInner：apply_mcp_to_target 命令核心。
-func ApplyMCPToTargetInner(store *WorkspaceConfigStore, serverName string, targetID string) (*McpTargetMutationResult, error) {
-	config, err := store.Parse()
-	if err != nil {
-		return nil, err
-	}
-	serverName, err = normalizeMCPName(serverName)
-	if err != nil {
-		return nil, err
-	}
+// resolveMcpCell：格子寻址（登记 server 名 + 路径条目名 → 解析形态）。
+func resolveMcpCell(config *ResolvedManagerConfig, serverName string, pathName string) (*ResolvedMcpConfig, *ResolvedMcpPath, error) {
 	server := findResolvedMcp(config, serverName)
 	if server == nil {
-		return nil, fmt.Errorf("MCP not found: %s", serverName)
+		return nil, nil, fmt.Errorf("MCP not found: %s", serverName)
 	}
-	target := config.targetByID(targetID)
-	if target == nil {
-		return nil, targetUnavailable(targetID)
+	path := config.mcpPathByName(pathName)
+	if path == nil {
+		return nil, nil, mcpPathUnavailable(pathName)
 	}
+	return server, path, nil
+}
 
-	// 落点缺失由 applyMCPToTargetConfig 统一判定（那里是「没有落点」口径的
-	// 唯一定义处），这里不再复述一遍。
-	updatedPath, err := applyMCPToTargetConfig(target, server)
+// applyMCPCell：把登记 server 写进一条 MCP 路径（幂等，重复应用内容不变）。
+func applyMCPCell(config *ResolvedManagerConfig, serverName string, pathName string) (McpPathMutationResult, error) {
+	server, path, err := resolveMcpCell(config, serverName, pathName)
 	if err != nil {
-		return nil, err
+		return McpPathMutationResult{}, err
 	}
-
-	displayed := support.DisplayPath(updatedPath)
-	return &McpTargetMutationResult{
+	if err := applyMCPToPathConfig(path, server); err != nil {
+		return McpPathMutationResult{}, err
+	}
+	displayed := support.DisplayPath(path.ConfigPath)
+	return McpPathMutationResult{
 		ServerName:  serverName,
-		TargetID:    AgentTargetID(targetID),
+		PathID:      pathName,
 		UpdatedPath: &displayed,
 		Action:      "apply",
-		Detail:      fmt.Sprintf("已写入 %s", support.DisplayPath(updatedPath)),
+		Detail:      fmt.Sprintf("已写入 %s", displayed),
 	}, nil
 }
 
-// PreviewMCPTargetInner：preview_mcp_target 命令核心。
-func PreviewMCPTargetInner(store *WorkspaceConfigStore, serverName string, targetID string) (*McpTargetPreviewResult, error) {
-	config, err := store.Parse()
+// removeMCPCell：从一条 MCP 路径移除登记 server 的条目；条目不存在时返回
+// action 为 noop 的结果而非报错。
+func removeMCPCell(config *ResolvedManagerConfig, serverName string, pathName string) (McpPathMutationResult, error) {
+	_, path, err := resolveMcpCell(config, serverName, pathName)
+	if err != nil {
+		return McpPathMutationResult{}, err
+	}
+	return removeMCPFromPathConfig(path, serverName)
+}
+
+// mcpCellPreview：单格条目预览——预览展示的就是将要写入的。
+type mcpCellPreview struct {
+	ConfigPath string
+	Format     string
+	Content    string
+}
+
+// previewMCPCell：条目预览（聚合预演的创建项构造与测试共用）。「写不进的
+// 文件不该给出预览」由 writer.previewEntry 保证：先确认文件可解析再序列化
+// desired 条目。
+func previewMCPCell(config *ResolvedManagerConfig, serverName string, pathName string) (*mcpCellPreview, error) {
+	server, path, err := resolveMcpCell(config, serverName, pathName)
 	if err != nil {
 		return nil, err
 	}
-	serverName, err = normalizeMCPName(serverName)
+	format, content, err := mcpFormatWriterFor(path.MCPConfigType).previewEntry(path.ConfigPath, server)
 	if err != nil {
 		return nil, err
 	}
-	server := findResolvedMcp(config, serverName)
-	if server == nil {
-		return nil, fmt.Errorf("MCP not found: %s", serverName)
-	}
-	target := config.targetByID(targetID)
-	if target == nil {
-		return nil, targetUnavailable(targetID)
-	}
-
-	if target.ConfigPath == nil {
-		// 这里要的不只是「检查」：结果里要回传落点，所以得先拿到它。文案与
-		// previewMCPEntry 保持一致。
-		return nil, fmt.Errorf("目标 %s 没有 MCP 配置路径", targetID)
-	}
-
-	format, content, err := previewMCPEntry(target, server)
-	if err != nil {
-		return nil, err
-	}
-
-	return &McpTargetPreviewResult{
-		ServerName: serverName,
-		TargetID:   AgentTargetID(targetID),
-		ConfigPath: support.DisplayPath(*target.ConfigPath),
+	return &mcpCellPreview{
+		ConfigPath: support.DisplayPath(path.ConfigPath),
 		Format:     format,
 		Content:    content,
 	}, nil
-}
-
-// RemoveMCPFromTargetInner：remove_mcp_from_target 命令核心。
-func RemoveMCPFromTargetInner(store *WorkspaceConfigStore, serverName string, targetID string) (*McpTargetMutationResult, error) {
-	config, err := store.Parse()
-	if err != nil {
-		return nil, err
-	}
-	serverName, err = normalizeMCPName(serverName)
-	if err != nil {
-		return nil, err
-	}
-	target := config.targetByID(targetID)
-	if target == nil {
-		return nil, targetUnavailable(targetID)
-	}
-
-	mutation, err := removeMCPFromTargetConfig(target, serverName)
-	if err != nil {
-		return nil, err
-	}
-	return &mutation, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -122,49 +94,17 @@ func RemoveMCPFromTargetInner(store *WorkspaceConfigStore, serverName string, ta
 // ---------------------------------------------------------------------------
 
 // ReadExistingMCPEntries：读既有条目（key 为 server 名；dsh 按清洗后的
-// serverName）。prefix 的内置回落在这里完成，writer 只认生效前缀。导出供
-// 测试（对齐 Rust pub(super)）。
-func ReadExistingMCPEntries(target *ResolvedTargetConfig, configPath string, env *support.Environment) (map[string]any, error) {
-	prefix := effectivePrefix(target.MCPConfigPrefix, &target.ID, env)
-	return mcpFormatWriterFor(target.MCPConfigType).readExistingEntries(prefix, configPath)
+// serverName）。导出供测试（对齐 Rust pub(super)）。
+func ReadExistingMCPEntries(path *ResolvedMcpPath, configPath string) (map[string]any, error) {
+	return mcpFormatWriterFor(path.MCPConfigType).readExistingEntries(path.MCPConfigPrefix, configPath)
 }
 
-func previewMCPEntry(target *ResolvedTargetConfig, server *ResolvedMcpConfig) (string, string, error) {
-	// 预览和写入必须拒绝没有落点的 target（地址都写不出去），删除相反：见
-	// removeMCPFromTargetConfig 的 nil 分支。
-	if target.ConfigPath == nil {
-		return "", "", fmt.Errorf("目标 %s 没有 MCP 配置路径", target.ID)
-	}
-	return mcpFormatWriterFor(target.MCPConfigType).previewEntry(*target.ConfigPath, server)
+func applyMCPToPathConfig(path *ResolvedMcpPath, server *ResolvedMcpConfig) error {
+	return mcpFormatWriterFor(path.MCPConfigType).applyEntry(path, path.ConfigPath, server)
 }
 
-func applyMCPToTargetConfig(target *ResolvedTargetConfig, server *ResolvedMcpConfig) (string, error) {
-	if target.ConfigPath == nil {
-		return "", fmt.Errorf("目标 %s 没有 MCP 配置路径", target.ID)
-	}
-	if err := mcpFormatWriterFor(target.MCPConfigType).applyEntry(target, *target.ConfigPath, server); err != nil {
-		return "", err
-	}
-	return *target.ConfigPath, nil
-}
-
-// 「没有落点」两种 None 行为是刻意的，不是不一致：写入与预览必须报错（没有
-// 地址就写不出去），删除必须跳过（它在遍历全部 target 的循环里被调用，报错
-// 会中断整轮清理）。改口径只改这一处。
-func removeMCPFromTargetConfig(target *ResolvedTargetConfig, serverName string) (McpTargetMutationResult, error) {
-	// 未配置 MCP 的 target 无配置可清理；必须返回 noop 而非报错。
-	// 否则删除 MCP 时遍历全部 target 会被这类 target 中断。
-	if target.ConfigPath == nil {
-		return McpTargetMutationResult{
-			ServerName:  serverName,
-			TargetID:    target.ID,
-			UpdatedPath: nil,
-			Action:      "noop",
-			Detail:      "目标未配置 MCP，跳过。",
-		}, nil
-	}
-
-	return mcpFormatWriterFor(target.MCPConfigType).removeEntry(target, *target.ConfigPath, serverName)
+func removeMCPFromPathConfig(path *ResolvedMcpPath, serverName string) (McpPathMutationResult, error) {
+	return mcpFormatWriterFor(path.MCPConfigType).removeEntry(path, path.ConfigPath, serverName)
 }
 
 func findResolvedMcp(config *ResolvedManagerConfig, name string) *ResolvedMcpConfig {
@@ -199,6 +139,25 @@ func readFileEntries(writer mcpFormatWriter, prefix string, configPath string) (
 		entries := make(map[string]any, len(table))
 		for name, value := range table {
 			entries[name] = value
+		}
+		return entries, nil
+	case mcpFormatYAML:
+		// YAML 载体走 yaml.Node 手术读写（保留注释与无关键），不走 map
+		// 往返——整文件重排会丢用户的注释与键序。
+		table, err := getYAMLMappingPathByDoc(configPath, prefix)
+		if err != nil {
+			return nil, err
+		}
+		entries := map[string]any{}
+		if table == nil {
+			return entries, nil
+		}
+		for i := 0; i+1 < len(table.Content); i += 2 {
+			name, ok := support.NodeAsStr(table.Content[i])
+			if !ok {
+				continue
+			}
+			entries[name] = yamlNodeToJSONValue(support.Untag(table.Content[i+1]))
 		}
 		return entries, nil
 	default:
@@ -242,6 +201,22 @@ func previewFileEntry(writer mcpFormatWriter, configPath string, server *Resolve
 			return "", "", fmt.Errorf("MCP 预览序列化失败：%v", err)
 		}
 		return "toml", content, nil
+	case mcpFormatYAML:
+		// 与 JSON/TOML 一致：preview 先确认文件可解析（根必须是映射；缺失
+		// 的前缀层由 apply 创建，不构成预览障碍）。内容是条目本体，写入
+		// 位置由 configPrefix 说明交代。
+		if _, err := readYAMLMappingRoot(configPath); err != nil {
+			return "", "", err
+		}
+		entryNode, err := writer.desiredYAMLEntry(server)
+		if err != nil {
+			return "", "", err
+		}
+		content, err := support.MarshalYAMLNode(entryNode)
+		if err != nil {
+			return "", "", fmt.Errorf("MCP 预览序列化失败：%v", err)
+		}
+		return "yaml", content, nil
 	default:
 		if _, err := readJSONConfig(configPath); err != nil {
 			return "", "", err
@@ -259,7 +234,7 @@ func previewFileEntry(writer mcpFormatWriter, configPath string, server *Resolve
 }
 
 // applyFileEntry：应用条目到目标配置；幂等（重复应用内容不变）。
-func applyFileEntry(writer mcpFormatWriter, target *ResolvedTargetConfig, configPath string, server *ResolvedMcpConfig) error {
+func applyFileEntry(writer mcpFormatWriter, path *ResolvedMcpPath, configPath string, server *ResolvedMcpConfig) error {
 	format, err := detectSupportedFormat(writer, configPath)
 	if err != nil {
 		return err
@@ -270,7 +245,7 @@ func applyFileEntry(writer mcpFormatWriter, target *ResolvedTargetConfig, config
 		if err != nil {
 			return err
 		}
-		serverMap, err := ensureTOMLTablePath(root, target.MCPConfigPrefix)
+		serverMap, err := ensureTOMLTablePath(root, path.MCPConfigPrefix)
 		if err != nil {
 			return err
 		}
@@ -280,6 +255,23 @@ func applyFileEntry(writer mcpFormatWriter, target *ResolvedTargetConfig, config
 		}
 		serverMap[server.Name] = entry
 		return writeTOMLConfig(configPath, root)
+	case mcpFormatYAML:
+		// YAML 载体：根（含前缀逐层）在 yaml.Node 上导航/创建，条目外内容
+		// 与注释原样保留；文件不存在或为空时从零构造。
+		root, err := readYAMLMappingRoot(configPath)
+		if err != nil {
+			return err
+		}
+		serverMap, err := ensureYAMLMappingPath(root, path.MCPConfigPrefix)
+		if err != nil {
+			return err
+		}
+		entry, err := writer.desiredYAMLEntry(server)
+		if err != nil {
+			return err
+		}
+		support.NodeSet(serverMap, server.Name, entry)
+		return support.WriteYAMLDocument(configPath, root)
 	default:
 		root, err := readJSONConfig(configPath)
 		if err != nil {
@@ -292,7 +284,7 @@ func applyFileEntry(writer mcpFormatWriter, target *ResolvedTargetConfig, config
 			}
 			root = defaultRoot
 		}
-		serverMap, err := ensureJSONObjectPath(root, target.MCPConfigPrefix)
+		serverMap, err := ensureJSONObjectPath(root, path.MCPConfigPrefix)
 		if err != nil {
 			return err
 		}
@@ -306,10 +298,10 @@ func applyFileEntry(writer mcpFormatWriter, target *ResolvedTargetConfig, config
 }
 
 // removeFileEntry：移除条目；条目不存在时返回 action 为 noop 的结果而非报错。
-func removeFileEntry(writer mcpFormatWriter, target *ResolvedTargetConfig, configPath string, serverName string) (McpTargetMutationResult, error) {
-	noop := McpTargetMutationResult{
+func removeFileEntry(writer mcpFormatWriter, path *ResolvedMcpPath, configPath string, serverName string) (McpPathMutationResult, error) {
+	noop := McpPathMutationResult{
 		ServerName:  serverName,
-		TargetID:    target.ID,
+		PathID:      path.Name,
 		UpdatedPath: nil,
 		Action:      "noop",
 		Detail:      "目标配置里不存在该 MCP。",
@@ -317,21 +309,35 @@ func removeFileEntry(writer mcpFormatWriter, target *ResolvedTargetConfig, confi
 
 	format, err := detectSupportedFormat(writer, configPath)
 	if err != nil {
-		return McpTargetMutationResult{}, err
+		return McpPathMutationResult{}, err
 	}
 	var removed bool
 	switch format {
+	case mcpFormatYAML:
+		root, err := readYAMLMappingRoot(configPath)
+		if err != nil {
+			return McpPathMutationResult{}, err
+		}
+		table := getYAMLMappingPath(root, path.MCPConfigPrefix)
+		if table != nil {
+			if support.NodeRemove(table, serverName) {
+				if err := support.WriteYAMLDocument(configPath, root); err != nil {
+					return McpPathMutationResult{}, err
+				}
+				removed = true
+			}
+		}
 	case mcpFormatTOML:
 		root, err := readTOMLConfig(configPath)
 		if err != nil {
-			return McpTargetMutationResult{}, err
+			return McpPathMutationResult{}, err
 		}
-		table := getTOMLTablePath(root, target.MCPConfigPrefix)
+		table := getTOMLTablePath(root, path.MCPConfigPrefix)
 		if table != nil {
 			if _, exists := table[serverName]; exists {
 				delete(table, serverName)
 				if err := writeTOMLConfig(configPath, root); err != nil {
-					return McpTargetMutationResult{}, err
+					return McpPathMutationResult{}, err
 				}
 				removed = true
 			}
@@ -339,14 +345,14 @@ func removeFileEntry(writer mcpFormatWriter, target *ResolvedTargetConfig, confi
 	default:
 		root, err := readJSONConfig(configPath)
 		if err != nil {
-			return McpTargetMutationResult{}, err
+			return McpPathMutationResult{}, err
 		}
-		table := getJSONObjectPath(root, target.MCPConfigPrefix)
+		table := getJSONObjectPath(root, path.MCPConfigPrefix)
 		if table != nil {
 			if _, exists := table[serverName]; exists {
 				delete(table, serverName)
 				if err := writeJSONConfig(configPath, root); err != nil {
-					return McpTargetMutationResult{}, err
+					return McpPathMutationResult{}, err
 				}
 				removed = true
 			}
@@ -358,12 +364,12 @@ func removeFileEntry(writer mcpFormatWriter, target *ResolvedTargetConfig, confi
 	}
 
 	updatedPath := support.DisplayPath(configPath)
-	return McpTargetMutationResult{
+	return McpPathMutationResult{
 		ServerName:  serverName,
-		TargetID:    target.ID,
+		PathID:      path.Name,
 		UpdatedPath: &updatedPath,
 		Action:      "remove",
-		Detail:      fmt.Sprintf("已从 %s 移除 %s", target.ID, serverName),
+		Detail:      fmt.Sprintf("已从 %s 移除 %s", path.Name, serverName),
 	}, nil
 }
 
@@ -378,6 +384,75 @@ func detectSupportedFormat(writer mcpFormatWriter, configPath string) (mcpConfig
 	return format, nil
 }
 
+// readYAMLMappingRoot：读 YAML 配置根；文件不存在/空白/根为 null 时返回
+// 空映射节点（写入从零构造），根不是映射报错。
+func readYAMLMappingRoot(configPath string) (*yaml.Node, error) {
+	root, err := support.ReadYAMLDocument(configPath)
+	if err != nil {
+		return nil, err
+	}
+	if root == nil {
+		return support.YMap(), nil
+	}
+	if root.Kind != yaml.MappingNode {
+		return nil, fmt.Errorf("YAML 配置根节点必须是映射：%s", configPath)
+	}
+	return root, nil
+}
+
+// getYAMLMappingPath：只读下钻点分前缀，任何一段缺失或不是映射返回 nil。
+func getYAMLMappingPath(root *yaml.Node, path string) *yaml.Node {
+	current := root
+	for _, key := range strings.Split(path, ".") {
+		if strings.TrimSpace(key) == "" {
+			continue
+		}
+		if current == nil || current.Kind != yaml.MappingNode {
+			return nil
+		}
+		child := support.NodeGet(current, key)
+		if child == nil || child.Kind != yaml.MappingNode {
+			return nil
+		}
+		current = child
+	}
+	return current
+}
+
+// getYAMLMappingPathByDoc：从文件出发的只读下钻（文件不存在/空白返回 nil）。
+func getYAMLMappingPathByDoc(configPath string, prefix string) (*yaml.Node, error) {
+	root, err := support.ReadYAMLDocument(configPath)
+	if err != nil {
+		return nil, err
+	}
+	if root == nil || root.Kind != yaml.MappingNode {
+		return nil, nil
+	}
+	return getYAMLMappingPath(root, prefix), nil
+}
+
+// ensureYAMLMappingPath：按点分前缀逐段下钻，缺失的中间层补空映射；返回
+// 最终的条目表（原地修改 root）。
+func ensureYAMLMappingPath(root *yaml.Node, path string) (*yaml.Node, error) {
+	keys, err := splitConfigPath(path)
+	if err != nil {
+		return nil, err
+	}
+	current := root
+	for _, key := range keys {
+		child := support.NodeGet(current, key)
+		if child == nil || support.IsNullNode(child) {
+			child = support.YMap()
+			support.NodeSet(current, key, child)
+		}
+		if child.Kind != yaml.MappingNode {
+			return nil, fmt.Errorf("%s 必须是映射。", path)
+		}
+		current = child
+	}
+	return current, nil
+}
+
 // detectMCPFileFormat：MCP 配置文件格式判定，只按扩展名（.json → JSON、
 // .toml → TOML、其余报错）。这是 Go 迁移的已拍板行为变更，取代 Rust
 // detect_mcp_file_format 的两段式判定（文件存在且非空时先按 JSON5/TOML 试
@@ -389,24 +464,10 @@ func detectMCPFileFormat(configPath string) (mcpConfigFileFormat, error) {
 		return mcpFormatJSON, nil
 	case "toml":
 		return mcpFormatTOML, nil
+	case "yaml", "yml":
+		return mcpFormatYAML, nil
 	}
-	return 0, fmt.Errorf("无法从文件名推断 MCP 配置格式：%s，仅支持 json 与 toml", configPath)
-}
-
-// effectivePrefix：读取侧的生效前缀：target 没配 prefix 时按 id 回落内置布局
-// （旧配置兼容路径）。回落不出的非内置 id 按空前缀继续读——读空表、不猜测、
-// 不报错（有专门用例钉住）。
-func effectivePrefix(prefix string, targetID *AgentTargetID, env *support.Environment) string {
-	if strings.TrimSpace(prefix) != "" {
-		return prefix
-	}
-	if targetID == nil {
-		return prefix
-	}
-	if defaults, ok := builtinTargetDefaultsMap(env)[*targetID]; ok {
-		return defaults.ConfigPrefix
-	}
-	return prefix
+	return 0, fmt.Errorf("无法从文件名推断 MCP 配置格式：%s，仅支持 json、toml 与 yaml", configPath)
 }
 
 // ---------------------------------------------------------------------------
@@ -621,7 +682,10 @@ func CreateWorkspaceMCPInner(store *WorkspaceConfigStore, rawMcp RawMcpConfig) (
 }
 
 // UpdateWorkspaceMCPInner：update_workspace_mcp 命令核心（created_at 保留
-// 存量值）。
+// 存量值）。改名时先对已装路径做手术（apply 新名条目 + remove 旧名条目，以
+// 盘上旧名条目为准、与巡检同口径），全部成功后才写登记——路径手术中途失败
+// 时登记保持旧名，整个动作可重试（决策记录 2026-11-28-mcp-matrix-sync.md
+// 第 5 条）；内容变更（不改名）不自动传播，由同步弹窗刷新。
 func UpdateWorkspaceMCPInner(store *WorkspaceConfigStore, serverName string, rawMcp RawMcpConfig) (*WorkspaceMcpMutationResult, error) {
 	serverName, err := normalizeMCPName(serverName)
 	if err != nil {
@@ -630,6 +694,14 @@ func UpdateWorkspaceMCPInner(store *WorkspaceConfigStore, serverName string, raw
 
 	var result *WorkspaceMcpMutationResult
 	err = store.Locked(func(lock *ConfigLock) error {
+		rawContent, err := lock.ReadRaw()
+		if err != nil {
+			return err
+		}
+		resolvedConfig, err := parseManagerConfig(rawContent, lock.ConfigPath(), lock.Env())
+		if err != nil {
+			return err
+		}
 		rawConfig, err := lock.ParseRaw()
 		if err != nil {
 			return err
@@ -662,6 +734,28 @@ func UpdateWorkspaceMCPInner(store *WorkspaceConfigStore, serverName string, raw
 		nextMcp, err := normalizeRawMcp(rawMcp, nextServerName)
 		if err != nil {
 			return err
+		}
+
+		if nextServerName != serverName {
+			// 已装路径的手术在登记写入之前；串行整文件重写，apply 幂等，
+			// 中途失败重试整个命令即可收敛。
+			nextResolved := resolveRawMcp(nextServerName, nextMcp)
+			for _, name := range sortedKeys(resolvedConfig.McpPaths) {
+				path := resolvedConfig.McpPaths[name]
+				existing, err := ReadExistingMCPEntries(path, path.ConfigPath)
+				if err != nil {
+					return err
+				}
+				if _, installed := existing[mcpFormatWriterFor(path.MCPConfigType).entryKeyFor(serverName)]; !installed {
+					continue
+				}
+				if err := applyMCPToPathConfig(path, nextResolved); err != nil {
+					return err
+				}
+				if _, err := removeMCPFromPathConfig(path, serverName); err != nil {
+					return err
+				}
+			}
 		}
 
 		rawConfig.Mcps[existingIndex] = nextMcp
@@ -729,9 +823,9 @@ func DeleteWorkspaceMCPInner(store *WorkspaceConfigStore, serverName string) (*W
 			return err
 		}
 
-		// 「全部 target」的定义在寻址层：全局在前、项目按配置顺序。
-		for _, entry := range resolvedConfig.targetRefs() {
-			mutation, err := removeMCPFromTargetConfig(entry.target, resolved.Name)
+		// 「全部 MCP 路径」的迭代口径与寻址层一致（条目名字典序）。
+		for _, name := range sortedKeys(resolvedConfig.McpPaths) {
+			mutation, err := removeMCPFromPathConfig(resolvedConfig.McpPaths[name], resolved.Name)
 			if err != nil {
 				return err
 			}

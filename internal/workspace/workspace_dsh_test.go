@@ -28,15 +28,15 @@ func dshFixture(t *testing.T, root string, transport string, timeout *uint64, na
 	if timeout != nil {
 		timeoutValue = fmt.Sprintf("%d", *timeout)
 	}
-	writeFileT(t, store.ConfigPath(), fmt.Sprintf(`targets:
+	writeFileT(t, store.ConfigPath(), fmt.Sprintf(`skill_paths:
   dsh:
-    skill_dir: dsh/skills
-    mcp:
-      config_path: dsh/cordis.patch.yml
-      config_type: dsh
+    dir: dsh/skills
+mcp_paths:
+  dsh:
+    config_path: dsh/cordis.patch.yml
+    config_type: dsh
 mcps:
 - name: %s
-  enabled: true
   transport: %s
   command: node
   args: [server.js]
@@ -59,15 +59,15 @@ func dshRemoteFixture(t *testing.T, root string, transport string, url string, h
 	if url != "" {
 		urlValue = fmt.Sprintf("%q", url)
 	}
-	writeFileT(t, store.ConfigPath(), fmt.Sprintf(`targets:
+	writeFileT(t, store.ConfigPath(), fmt.Sprintf(`skill_paths:
   dsh:
-    skill_dir: dsh/skills
-    mcp:
-      config_path: dsh/cordis.patch.yml
-      config_type: dsh
+    dir: dsh/skills
+mcp_paths:
+  dsh:
+    config_path: dsh/cordis.patch.yml
+    config_type: dsh
 mcps:
 - name: %s
-  enabled: true
   transport: %s
   url: %s
   headers: %s
@@ -136,91 +136,62 @@ func nodeStr(t *testing.T, node *yaml.Node, key string) string {
 	return value
 }
 
-func TestDshDefaultsPresetAndPrefixRelaxation(t *testing.T) {
+func TestDshMcpPathPresetAndPrefixRelaxation(t *testing.T) {
 	_, dir := newTestStore(t, "dsh-defaults")
 	home := filepath.Join(dir, "home")
-	presets := TargetPresetsInner(envOf(t))
-	var preset *TargetPreset
+	presets := GetMcpPathPresetsInner(envOf(t))
+	var preset *McpPathPreset
 	for i := range presets {
-		if string(presets[i].TargetID) == "dsh" {
+		if presets[i].ConfigType == string(agents.McpConfigDsh) {
 			preset = &presets[i]
 		}
 	}
 	if preset == nil {
-		t.Fatal("缺少 dsh 预设")
+		t.Fatal("缺少 dsh MCP 路径预设")
 	}
-	if preset.SkillDir != filepath.Join(home, ".dsh/skills") {
-		t.Fatalf("preset skill_dir：%s", preset.SkillDir)
-	}
-	if preset.ConfigPath == nil || *preset.ConfigPath != filepath.Join(home, ".dsh/cordis.patch.yml") {
+	if preset.ConfigPath != filepath.Join(home, ".dsh/cordis.patch.yml") {
 		t.Fatalf("preset config_path：%+v", preset.ConfigPath)
 	}
-	if preset.MCPConfigPrefix != "" {
-		t.Fatalf("preset prefix 应为空：%q", preset.MCPConfigPrefix)
+	if preset.ConfigPrefix != "" {
+		t.Fatalf("preset prefix 应为空：%q", preset.ConfigPrefix)
 	}
 	if string(agents.McpConfigDsh) != "dsh" {
 		t.Fatalf("存储串漂移：%s", agents.McpConfigDsh)
 	}
 
-	// config.yaml 里 dsh 允许「有 config_path + 空 prefix」；common 不允许。
+	// mcp_paths 里 dsh 允许「有 config_path + 空 prefix」；common 不允许。
 	path := filepath.Join(t.TempDir(), "reins-dsh-defaults.yaml")
 	config, err := parseManagerConfig(
-		"targets:\n  dsh:\n    skill_dir: dsh/skills\n    mcp:\n      config_path: dsh/cordis.patch.yml\n",
+		"mcp_paths:\n  dsh:\n    config_path: dsh/cordis.patch.yml\n",
 		path, &support.Environment{})
 	if err != nil {
 		t.Fatalf("parse dsh: %v", err)
 	}
-	target := config.targetByID("dsh")
-	if target == nil {
-		t.Fatal("dsh target exists")
+	mcpPath := config.mcpPathByName("dsh")
+	if mcpPath == nil {
+		t.Fatal("dsh mcp path exists")
 	}
-	if target.MCPConfigType != agents.McpConfigDsh {
-		t.Fatalf("config_type：%s", target.MCPConfigType)
+	if mcpPath.MCPConfigType != agents.McpConfigDsh {
+		t.Fatalf("config_type：%s", mcpPath.MCPConfigType)
 	}
-	if target.MCPConfigPrefix != "" {
-		t.Fatalf("prefix 应为空：%q", target.MCPConfigPrefix)
+	if mcpPath.MCPConfigPrefix != "" {
+		t.Fatalf("prefix 应为空：%q", mcpPath.MCPConfigPrefix)
 	}
 	if _, err := parseManagerConfig(
-		"targets:\n  other:\n    skill_dir: x/skills\n    mcp:\n      config_path: x/config.json\n",
+		"mcp_paths:\n  other:\n    config_path: x/config.json\n",
 		path, &support.Environment{}); err == nil {
 		t.Fatal("common 有 config_path 无 prefix 必须报错")
 	}
 }
 
-// dsh 项目层只派生 .dsh/skills；MCP 走全局 Cordis patch，项目级无配置文件。
-func TestDshProjectDefaultsAreSkillsOnly(t *testing.T) {
-	project := t.TempDir()
-	var dsh *TargetDefaults
-	for _, item := range projectAgentDefaults(project) {
-		if string(item.ID) == "dsh" {
-			dsh = &item
-		}
-	}
-	if dsh == nil {
-		t.Fatal("dsh 项目默认值应存在")
-	}
-	if dsh.SkillDir != joinPath(project, ".dsh/skills") {
-		t.Fatalf("skill_dir：%s", dsh.SkillDir)
-	}
-	if dsh.ConfigPath != nil {
-		t.Fatalf("项目层不应派生 MCP 配置路径：%+v", dsh.ConfigPath)
-	}
-	if dsh.ConfigPrefix != "" {
-		t.Fatalf("prefix：%q", dsh.ConfigPrefix)
-	}
-	if dsh.ConfigType != agents.McpConfigDsh {
-		t.Fatalf("config_type：%s", dsh.ConfigType)
-	}
-}
+func TestDshCreateMcpPathAcceptsConfigPathWithoutPrefix(t *testing.T) {
+	store, root := newTestStore(t, "dsh-create-mcp-path")
+	writeFileT(t, store.ConfigPath(), "skill_paths: {}\nmcp_paths: {}\n")
 
-func TestDshCreateTargetAcceptsConfigPathWithoutPrefix(t *testing.T) {
-	store, root := newTestStore(t, "dsh-create-target")
-	writeFileT(t, store.ConfigPath(), "{}\n")
-
-	if _, err := CreateWorkspaceTargetInner(store, RawTargetInput{
-		TargetID:   "dsh",
-		SkillDir:   "dsh/skills",
-		ConfigPath: strPtr("dsh/cordis.patch.yml"),
+	if _, err := CreateMcpPathInner(store, RawMcpPathInput{
+		Name:       "dsh",
+		ConfigPath: "dsh/cordis.patch.yml",
+		ConfigType: "dsh",
 	}); err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -229,15 +200,15 @@ func TestDshCreateTargetAcceptsConfigPathWithoutPrefix(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	target := config.targetByID("dsh")
-	if target == nil {
-		t.Fatal("dsh target exists")
+	mcpPath := config.mcpPathByName("dsh")
+	if mcpPath == nil {
+		t.Fatal("dsh mcp path exists")
 	}
-	if target.ConfigPath == nil || *target.ConfigPath != joinPath(root, "dsh/cordis.patch.yml") {
-		t.Fatalf("config_path：%+v", target.ConfigPath)
+	if mcpPath.ConfigPath != joinPath(root, "dsh/cordis.patch.yml") {
+		t.Fatalf("config_path：%+v", mcpPath.ConfigPath)
 	}
-	if target.MCPConfigPrefix != "" {
-		t.Fatalf("prefix 应为空：%q", target.MCPConfigPrefix)
+	if mcpPath.MCPConfigPrefix != "" {
+		t.Fatalf("prefix 应为空：%q", mcpPath.MCPConfigPrefix)
 	}
 }
 
@@ -246,7 +217,7 @@ func TestDshApplyCreatesPatchFileAndPreviewMatches(t *testing.T) {
 	store = dshFixture(t, filepath.Dir(store.ConfigPath()), "stdio", ptrUint64(30_000), "probe")
 	path := dshPatchPath(t, store)
 
-	preview, err := PreviewMCPTargetInner(store, "probe", "dsh")
+	preview, err := previewMCPCell(mustParseT(t, store), "probe", "dsh")
 	if err != nil {
 		t.Fatalf("preview: %v", err)
 	}
@@ -254,7 +225,7 @@ func TestDshApplyCreatesPatchFileAndPreviewMatches(t *testing.T) {
 		t.Fatalf("format：%s", preview.Format)
 	}
 
-	if _, err := ApplyMCPToTargetInner(store, "probe", "dsh"); err != nil {
+	if _, err := applyMCPCell(mustParseT(t, store), "probe", "dsh"); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
 
@@ -302,8 +273,8 @@ func TestDshApplyCreatesPatchFileAndPreviewMatches(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	target := parsed.targetByID("dsh")
-	entries, err := ReadExistingMCPEntries(target, path, &support.Environment{})
+	mcpPath := parsed.mcpPathByName("dsh")
+	entries, err := ReadExistingMCPEntries(mcpPath, path)
 	if err != nil {
 		t.Fatalf("read entries: %v", err)
 	}
@@ -376,7 +347,7 @@ func TestDshApplyMergesIntoExistingFileAndPreservesUserEntries(t *testing.T) {
 `
 	writeFileT(t, path, existing)
 
-	if _, err := ApplyMCPToTargetInner(store, "probe", "dsh"); err != nil {
+	if _, err := applyMCPCell(mustParseT(t, store), "probe", "dsh"); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
 	first := readFileT(t, path)
@@ -418,7 +389,7 @@ func TestDshApplyMergesIntoExistingFileAndPreservesUserEntries(t *testing.T) {
 	}
 
 	// 重复 apply 幂等：文件字节不变。
-	if _, err := ApplyMCPToTargetInner(store, "probe", "dsh"); err != nil {
+	if _, err := applyMCPCell(mustParseT(t, store), "probe", "dsh"); err != nil {
 		t.Fatalf("apply twice: %v", err)
 	}
 	if got := readFileT(t, path); got != first {
@@ -437,7 +408,7 @@ func TestDshApplyMergesIntoExistingFileAndPreservesUserEntries(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("update mcp: %v", err)
 	}
-	if _, err := ApplyMCPToTargetInner(store, "probe", "dsh"); err != nil {
+	if _, err := applyMCPCell(mustParseT(t, store), "probe", "dsh"); err != nil {
 		t.Fatalf("apply after update: %v", err)
 	}
 	ops = parseOpsT(t, path)
@@ -460,7 +431,7 @@ func TestDshRemoveDeletesOnlyClaimedEntries(t *testing.T) {
 	path := dshPatchPath(t, store)
 
 	// 文件不存在时移除是 noop，且不创建文件。
-	mutation, err := RemoveMCPFromTargetInner(store, "probe", "dsh")
+	mutation, err := removeMCPCell(mustParseT(t, store), "probe", "dsh")
 	if err != nil {
 		t.Fatalf("remove: %v", err)
 	}
@@ -471,7 +442,7 @@ func TestDshRemoveDeletesOnlyClaimedEntries(t *testing.T) {
 		t.Fatalf("noop 不该创建文件：%v", err)
 	}
 
-	if _, err := ApplyMCPToTargetInner(store, "probe", "dsh"); err != nil {
+	if _, err := applyMCPCell(mustParseT(t, store), "probe", "dsh"); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
 	reinsContent := readFileT(t, path)
@@ -480,7 +451,7 @@ func TestDshRemoveDeletesOnlyClaimedEntries(t *testing.T) {
 		t.Fatalf("预置用户条目后应有 2 个操作：%d", len(ops.Content))
 	}
 
-	if _, err := RemoveMCPFromTargetInner(store, "probe", "dsh"); err != nil {
+	if _, err := removeMCPCell(mustParseT(t, store), "probe", "dsh"); err != nil {
 		t.Fatalf("remove: %v", err)
 	}
 	ops := parseOpsT(t, path)
@@ -494,7 +465,7 @@ func TestDshRemoveDeletesOnlyClaimedEntries(t *testing.T) {
 	if name, _ := support.NodeAsStr(support.NodeGet(memorix, "name")); name != "memorix" {
 		t.Fatalf("用户条目不受移除影响：%s", name)
 	}
-	if mutation, err := RemoveMCPFromTargetInner(store, "probe", "dsh"); err != nil || mutation.Action != "noop" {
+	if mutation, err := removeMCPCell(mustParseT(t, store), "probe", "dsh"); err != nil || mutation.Action != "noop" {
 		t.Fatalf("二次移除应为 noop：%+v %v", mutation, err)
 	}
 
@@ -502,10 +473,10 @@ func TestDshRemoveDeletesOnlyClaimedEntries(t *testing.T) {
 	store2, _ := newTestStore(t, "dsh-remove-empty")
 	store2 = dshFixture(t, filepath.Dir(store2.ConfigPath()), "stdio", nil, "probe")
 	path2 := dshPatchPath(t, store2)
-	if _, err := ApplyMCPToTargetInner(store2, "probe", "dsh"); err != nil {
+	if _, err := applyMCPCell(mustParseT(t, store2), "probe", "dsh"); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
-	if _, err := RemoveMCPFromTargetInner(store2, "probe", "dsh"); err != nil {
+	if _, err := removeMCPCell(mustParseT(t, store2), "probe", "dsh"); err != nil {
 		t.Fatalf("remove: %v", err)
 	}
 	if got := readFileT(t, path2); got != "[]\n" {
@@ -518,7 +489,7 @@ func TestDshServerNameSanitization(t *testing.T) {
 	store = dshFixture(t, filepath.Dir(store.ConfigPath()), "stdio", nil, "my probe.v2/中文")
 	path := dshPatchPath(t, store)
 
-	if _, err := ApplyMCPToTargetInner(store, "my probe.v2/中文", "dsh"); err != nil {
+	if _, err := applyMCPCell(mustParseT(t, store), "my probe.v2/中文", "dsh"); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
 	ops := parseOpsT(t, path)
@@ -530,8 +501,8 @@ func TestDshServerNameSanitization(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	target := parsed.targetByID("dsh")
-	entries, err := ReadExistingMCPEntries(target, path, &support.Environment{})
+	mcpPath := parsed.mcpPathByName("dsh")
+	entries, err := ReadExistingMCPEntries(mcpPath, path)
 	if err != nil {
 		t.Fatalf("read entries: %v", err)
 	}
@@ -548,7 +519,7 @@ func TestDshServerNameSanitization(t *testing.T) {
 	longName := strings.Repeat("a", 40)
 	store2 = dshFixture(t, filepath.Dir(store2.ConfigPath()), "stdio", nil, longName)
 	path2 := dshPatchPath(t, store2)
-	if _, err := ApplyMCPToTargetInner(store2, longName, "dsh"); err != nil {
+	if _, err := applyMCPCell(mustParseT(t, store2), longName, "dsh"); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
 	ops2 := parseOpsT(t, path2)
@@ -563,7 +534,7 @@ func TestDshHTTPTransportWritesStreamableHTTPEntry(t *testing.T) {
 	store = dshRemoteFixture(t, filepath.Dir(store.ConfigPath()), "http", "https://example.invalid/mcp", `{X-Key: value}`, "probe")
 	path := dshPatchPath(t, store)
 
-	preview, err := PreviewMCPTargetInner(store, "probe", "dsh")
+	preview, err := previewMCPCell(mustParseT(t, store), "probe", "dsh")
 	if err != nil {
 		t.Fatalf("preview: %v", err)
 	}
@@ -571,7 +542,7 @@ func TestDshHTTPTransportWritesStreamableHTTPEntry(t *testing.T) {
 		t.Fatalf("format：%s", preview.Format)
 	}
 
-	if _, err := ApplyMCPToTargetInner(store, "probe", "dsh"); err != nil {
+	if _, err := applyMCPCell(mustParseT(t, store), "probe", "dsh"); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
 	ops := parseOpsT(t, path)
@@ -608,8 +579,8 @@ func TestDshHTTPTransportWritesStreamableHTTPEntry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	target := parsed.targetByID("dsh")
-	entries, err := ReadExistingMCPEntries(target, path, &support.Environment{})
+	mcpPath := parsed.mcpPathByName("dsh")
+	entries, err := ReadExistingMCPEntries(mcpPath, path)
 	if err != nil {
 		t.Fatalf("read entries: %v", err)
 	}
@@ -627,21 +598,21 @@ func TestDshHTTPTransportWritesStreamableHTTPEntry(t *testing.T) {
 
 	// 重复 apply 幂等：文件字节不变。
 	first := readFileT(t, path)
-	if _, err := ApplyMCPToTargetInner(store, "probe", "dsh"); err != nil {
+	if _, err := applyMCPCell(mustParseT(t, store), "probe", "dsh"); err != nil {
 		t.Fatalf("apply twice: %v", err)
 	}
 	if got := readFileT(t, path); got != first {
 		t.Fatalf("重复 apply 必须幂等：\n got: %q\nwant: %q", got, first)
 	}
 
-	mutation, err := RemoveMCPFromTargetInner(store, "probe", "dsh")
+	mutation, err := removeMCPCell(mustParseT(t, store), "probe", "dsh")
 	if err != nil || mutation.Action != "remove" {
 		t.Fatalf("remove：%+v %v", mutation, err)
 	}
 	if got := readFileT(t, path); got != "[]\n" {
 		t.Fatalf("删空后保留空列表：%q", got)
 	}
-	if mutation, err := RemoveMCPFromTargetInner(store, "probe", "dsh"); err != nil || mutation.Action != "noop" {
+	if mutation, err := removeMCPCell(mustParseT(t, store), "probe", "dsh"); err != nil || mutation.Action != "noop" {
 		t.Fatalf("二次删除应为 noop：%+v %v", mutation, err)
 	}
 }
@@ -651,7 +622,7 @@ func TestDshHTTPWithoutHeadersOmitsHeadersKey(t *testing.T) {
 	store = dshRemoteFixture(t, filepath.Dir(store.ConfigPath()), "http", "https://example.invalid/mcp", "{}", "probe")
 	path := dshPatchPath(t, store)
 
-	if _, err := ApplyMCPToTargetInner(store, "probe", "dsh"); err != nil {
+	if _, err := applyMCPCell(mustParseT(t, store), "probe", "dsh"); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
 	ops := parseOpsT(t, path)
@@ -669,7 +640,7 @@ func TestDshSSETransportMapsToStreamableHTTP(t *testing.T) {
 	store = dshRemoteFixture(t, filepath.Dir(store.ConfigPath()), "sse", "https://example.invalid/sse", "{}", "probe")
 	path := dshPatchPath(t, store)
 
-	if _, err := ApplyMCPToTargetInner(store, "probe", "dsh"); err != nil {
+	if _, err := applyMCPCell(mustParseT(t, store), "probe", "dsh"); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
 	ops := parseOpsT(t, path)
@@ -690,14 +661,9 @@ func TestDshRemoteWithoutURLFailsWithoutWriting(t *testing.T) {
 	store = dshRemoteFixture(t, filepath.Dir(store.ConfigPath()), "http", "", "{}", "probe")
 	path := dshPatchPath(t, store)
 
-	// 配置解析层先于 writer 拒绝无链接的远端 MCP。
-	if _, err := PreviewMCPTargetInner(store, "probe", "dsh"); err == nil {
-		t.Fatal("preview 应报错")
-	} else if !strings.Contains(err.Error(), "必须提供 mcp 链接") {
-		t.Fatalf("无链接的远端 MCP 应报错：%v", err)
-	}
-	if _, err := ApplyMCPToTargetInner(store, "probe", "dsh"); err == nil {
-		t.Fatal("apply 应报错")
+	// 配置解析层先于 writer 拒绝无链接的远端 MCP（解析失败即无任何格子操作）。
+	if _, err := store.Parse(); err == nil {
+		t.Fatal("解析应报错")
 	} else if !strings.Contains(err.Error(), "必须提供 mcp 链接") {
 		t.Fatalf("无链接的远端 MCP 应报错：%v", err)
 	}
@@ -712,21 +678,21 @@ func TestDshMalformedFilesAreRejectedWithoutWriting(t *testing.T) {
 	path := dshPatchPath(t, store)
 	for _, content := range []string{"model: unchanged\n", "[unclosed\n"} {
 		writeFileT(t, path, content)
-		if _, err := PreviewMCPTargetInner(store, "probe", "dsh"); err == nil {
+		if _, err := previewMCPCell(mustParseT(t, store), "probe", "dsh"); err == nil {
 			t.Fatalf("preview(%q) 应报错", content)
 		}
-		if _, err := ApplyMCPToTargetInner(store, "probe", "dsh"); err == nil {
+		if _, err := applyMCPCell(mustParseT(t, store), "probe", "dsh"); err == nil {
 			t.Fatalf("apply(%q) 应报错", content)
 		}
 		parsed, err := store.Parse()
 		if err != nil {
 			t.Fatalf("parse: %v", err)
 		}
-		target := parsed.targetByID("dsh")
-		if _, err := ReadExistingMCPEntries(target, path, &support.Environment{}); err == nil {
+		mcpPath := parsed.mcpPathByName("dsh")
+		if _, err := ReadExistingMCPEntries(mcpPath, path); err == nil {
 			t.Fatalf("read(%q) 应报错", content)
 		}
-		if _, err := RemoveMCPFromTargetInner(store, "probe", "dsh"); err == nil {
+		if _, err := removeMCPCell(mustParseT(t, store), "probe", "dsh"); err == nil {
 			t.Fatalf("remove(%q) 应报错", content)
 		}
 		if got := readFileT(t, path); got != content {
@@ -737,7 +703,7 @@ func TestDshMalformedFilesAreRejectedWithoutWriting(t *testing.T) {
 	// 空文件与空列表都是合法的 patch（按「无操作」处理）。
 	for _, content := range []string{"", "[]\n"} {
 		writeFileT(t, path, content)
-		if _, err := ApplyMCPToTargetInner(store, "probe", "dsh"); err != nil {
+		if _, err := applyMCPCell(mustParseT(t, store), "probe", "dsh"); err != nil {
 			t.Fatalf("apply(%q): %v", content, err)
 		}
 		if claimedConfigT(t, parseOpsT(t, path), "probe") == nil {

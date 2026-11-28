@@ -9,6 +9,7 @@ package agents
 
 import (
 	"fmt"
+	"runtime"
 	"strings"
 
 	"reins/internal/support"
@@ -62,21 +63,10 @@ const (
 	McpConfigOpenCode  McpConfigType = "opencode"
 	McpConfigGrokBuild McpConfigType = "grokbuild"
 	McpConfigDsh       McpConfigType = "dsh"
-)
-
-// TemplateEntry：默认 config.yaml 模板里该工具的条目形态。
-type TemplateEntry uint8
-
-const (
-	// TemplateStandard：写全 skill_dir 与 MCP 路径（~ 缩写；pi 在 env 重定向
-	// 时固化为绝对路径）。mcp.enabled 键现状只有部分条目携带（pi 段没有），
-	// 如实区分。
-	TemplateStandard TemplateEntry = iota
-	// TemplateFollowEnv：留空 skill_dir 与 MCP 路径：解析时回落 builtin
-	// defaults，跟随 GROK_HOME 重定向，避免模板固化错误路径（grokbuild）。
-	TemplateFollowEnv
-	// TemplateAbsent：不出现在默认模板（dsh）。
-	TemplateAbsent
+	// McpConfigHermes：旧配置里的 hermes 类型（2026-11-28 曾按载体单独成
+	// 型）。条目方言与 common 相同，只是载体文件是 YAML，解析时归一为
+	// common，由文件扩展名决定序列化形态；不是独立方言，也不再下发。
+	McpConfigHermes McpConfigType = "hermes"
 )
 
 // GlobalRoot：全局布局的路径根。Redirect.EnvVar 非空表示该工具官方支持
@@ -87,13 +77,37 @@ type GlobalRoot struct {
 	Redirect support.Redirect
 }
 
+// hermesDefaultDir：HERMES_HOME 未设置时的默认目录。POSIX 官方默认
+// `~/.hermes`；Windows 官方默认 `%LOCALAPPDATA%\hermes`，标准环境下
+// LOCALAPPDATA 恒为 HOME\AppData\Local，按 HOME 相对目录表达（Ref.md
+// Hermes 节）。
+func hermesDefaultDir() string {
+	if runtime.GOOS == "windows" {
+		return nativeDefaultDir("AppData/Local/hermes")
+	}
+	return ".hermes"
+}
+
+// nativeDefaultDir：把以 '/' 书写的多段默认目录按当前 OS 落原生分隔符。
+// Resolve 对 DefaultDir 只做单次拼接、保留内嵌分隔符，Windows 上内嵌 '/'
+// 会产出 `home\AppData/Local/hermes\skills` 这类混合形态并直接进展示层
+// （预设回填、目录不存在提示）；比较路径虽会 canonicalize，展示不该靠它
+// 兜底。单段目录（.grok 等）不受影响。
+func nativeDefaultDir(dir string) string {
+	if runtime.GOOS == "windows" {
+		return strings.ReplaceAll(dir, "/", "\\")
+	}
+	return dir
+}
+
 var (
 	RootHome            = GlobalRoot{Name: "home"}
 	RootGrokHome        = GlobalRoot{Name: "grok_home", Redirect: support.Redirect{EnvVar: "GROK_HOME", DefaultDir: ".grok", Label: "grok"}}
-	RootPiAgentDir      = GlobalRoot{Name: "pi_agent_dir", Redirect: support.Redirect{EnvVar: "PI_CODING_AGENT_DIR", DefaultDir: ".pi/agent", Label: "pi"}}
+	RootPiAgentDir      = GlobalRoot{Name: "pi_agent_dir", Redirect: support.Redirect{EnvVar: "PI_CODING_AGENT_DIR", DefaultDir: nativeDefaultDir(".pi/agent"), Label: "pi"}}
 	RootCodexHome       = GlobalRoot{Name: "codex_home", Redirect: support.Redirect{EnvVar: "CODEX_HOME", DefaultDir: ".codex", Label: "codex"}}
 	RootClaudeConfigDir = GlobalRoot{Name: "claude_config_dir", Redirect: support.Redirect{EnvVar: "CLAUDE_CONFIG_DIR", DefaultDir: ".claude", Label: "claude"}}
 	RootDshHome         = GlobalRoot{Name: "dsh_home", Redirect: support.Redirect{EnvVar: "DSH_HOME", DefaultDir: ".dsh", Label: "dsh"}}
+	RootHermesHome      = GlobalRoot{Name: "hermes_home", Redirect: support.Redirect{EnvVar: "HERMES_HOME", DefaultDir: hermesDefaultDir(), Label: "hermes"}}
 )
 
 // Redirects 返回清单登记的全部重定向描述（按 EnvVar 去重），供
@@ -133,20 +147,17 @@ func (r GlobalRoot) ResolvePath(env *support.Environment, path string) (string, 
 	return support.ManifestPath(env, root, rootOK, path)
 }
 
-// HomePrefix：未重定向时的 ~ 缩写前缀（默认模板路径与注释文案用）。
-func (r GlobalRoot) HomePrefix() string {
-	if !r.HasRedirect() {
-		return "~"
-	}
-	return "~/" + r.Redirect.DefaultDir
-}
-
-// McpLayout：MCP 配置格式属性，层级无关：同一工具全局与项目的写入格式一致。
+// McpLayout：MCP 配置格式属性，层级无关。
 type McpLayout struct {
-	// Prefix：MCP 条目键前缀。dsh 的 MCP 配置是 Cordis patch 操作列表，按
-	// name+serverName 定位条目，没有 configPrefix 概念（空串）。
+	// Prefix：MCP 条目键前缀。dsh 的 MCP 配置是 Cordis patch 操作列表、
+	// hermes 内嵌在 config.yaml 顶层 mcp_servers，都按各自结构定位条目，
+	// 没有 configPrefix 概念（空串）。
 	Prefix     string
 	ConfigType McpConfigType
+	// SSEUnsupported：官方契约——该工具的 MCP 配置不接受 legacy SSE
+	// transport，写入会被工具拒连（当前仅 pi）。知识归清单，路径视图据此
+	// 判定并下发给前端禁格，前端不按条目名猜。
+	SSEUnsupported bool
 }
 
 // GlobalLayout：全局布局。路径默认相对 GlobalRoot 根；`~/` 前缀表示以 HOME
@@ -157,43 +168,28 @@ type GlobalLayout struct {
 	McpConfigPath string // 空串 = 无 MCP 配置入口
 }
 
-// ProjectLayout：项目级布局，路径相对项目根。全局与项目非同构，如实表达
-// （claude 的 MCP 配置在项目根 .mcp.json、opencode 在项目根 opencode.json、
-// dsh 项目级无 MCP 配置入口等）。
-type ProjectLayout struct {
-	SkillDir      string
-	McpConfigPath string // 空串 = 无
-}
-
 // AgentSpec：一个被管理工具的静态描述。清单只读，查询返回的指针不得改写。
 type AgentSpec struct {
-	// Key：规范键：各域 id 的公共形式（与 AgentTargetId 一致的连字符小写）；
+	// Key：规范键：各域 id 与 workspace 预设名的公共形式（连字符小写）；
 	// 读者只在前端生成物导出（RenderAgentLabelsTS），生产路径不按键查询。
 	Key string
 	// Label：产品名：跨层唯一一份展示文案。
 	Label string
-	// SourceApp：session 域 wire id 映射（wire 写法各自保持现状）；空串 =
-	// 无。同样只被前端生成物导出读取。
+	// SourceApp：session 域 wire id 映射（wire 写法各自保持现状）；空串 = 无。
+	// 同样只被前端生成物导出读取。
 	SourceApp SourceApp
-	// TargetID：workspace 域 AgentTargetId；空串 = 无 workspace 入口。
-	TargetID string
 	// ProviderApp：providers 域键；空串 = 无。
 	ProviderApp ProviderApp
 	Mcp         McpLayout
 	Global      GlobalLayout
-	// Project：项目级布局；nil = 无项目级入口。
-	Project  *ProjectLayout
-	Template TemplateEntry
 }
 
-// AgentSpecs：清单本体。顺序即默认 config.yaml 模板的条目顺序；不在模板的
-// dsh 殿后。
+// AgentSpecs：清单本体。顺序即 workspace 预设的下发顺序。
 var AgentSpecs = []AgentSpec{
 	{
 		Key:         "codex",
 		Label:       "Codex",
 		SourceApp:   SourceCodex,
-		TargetID:    "codex",
 		ProviderApp: ProviderCodex,
 		Mcp: McpLayout{
 			Prefix:     "mcp_servers",
@@ -206,17 +202,11 @@ var AgentSpecs = []AgentSpec{
 			SkillDir:      "~/.agents/skills",
 			McpConfigPath: "config.toml",
 		},
-		Project: &ProjectLayout{
-			SkillDir:      ".agents/skills",
-			McpConfigPath: ".codex/config.toml",
-		},
-		Template: TemplateStandard,
 	},
 	{
 		Key:         "claude",
 		Label:       "Claude Code",
 		SourceApp:   SourceClaudeCode,
-		TargetID:    "claude",
 		ProviderApp: ProviderClaude,
 		Mcp: McpLayout{
 			Prefix:     "mcpServers",
@@ -231,18 +221,11 @@ var AgentSpecs = []AgentSpec{
 			SkillDir:      "skills",
 			McpConfigPath: ".claude.json",
 		},
-		// Claude 的项目级 MCP 配置按官方约定在项目根 .mcp.json。
-		Project: &ProjectLayout{
-			SkillDir:      ".claude/skills",
-			McpConfigPath: ".mcp.json",
-		},
-		Template: TemplateStandard,
 	},
 	{
 		Key:         "opencode",
 		Label:       "OpenCode",
 		SourceApp:   SourceOpenCode,
-		TargetID:    "opencode",
 		ProviderApp: ProviderOpencode,
 		// opencode v2 的 mcp 配置在 mcp.servers 下，顶层 mcp 不被识别。
 		Mcp: McpLayout{
@@ -254,17 +237,11 @@ var AgentSpecs = []AgentSpec{
 			SkillDir:      ".config/opencode/skills",
 			McpConfigPath: ".config/opencode/opencode.json",
 		},
-		Project: &ProjectLayout{
-			SkillDir:      ".opencode/skills",
-			McpConfigPath: "opencode.json",
-		},
-		Template: TemplateStandard,
 	},
 	{
 		Key:         "zcode",
 		Label:       "ZCode",
 		SourceApp:   SourceZcode,
-		TargetID:    "zcode",
 		ProviderApp: ProviderZcode,
 		Mcp: McpLayout{
 			Prefix:     "mcp.servers",
@@ -275,17 +252,11 @@ var AgentSpecs = []AgentSpec{
 			SkillDir:      ".zcode/skills",
 			McpConfigPath: ".zcode/cli/config.json",
 		},
-		Project: &ProjectLayout{
-			SkillDir:      ".zcode/skills",
-			McpConfigPath: ".zcode/config.json",
-		},
-		Template: TemplateStandard,
 	},
 	{
 		Key:         "grokbuild",
 		Label:       "Grok Build",
 		SourceApp:   SourceGrokBuild,
-		TargetID:    "grokbuild",
 		ProviderApp: ProviderGrokbuild,
 		Mcp: McpLayout{
 			Prefix:     "mcp_servers",
@@ -296,41 +267,29 @@ var AgentSpecs = []AgentSpec{
 			SkillDir:      "skills",
 			McpConfigPath: "config.toml",
 		},
-		Project: &ProjectLayout{
-			SkillDir:      ".grok/skills",
-			McpConfigPath: ".grok/config.toml",
-		},
-		Template: TemplateFollowEnv,
 	},
 	{
 		Key:         "pi",
 		Label:       "Pi",
 		SourceApp:   SourcePi,
-		TargetID:    "pi",
 		ProviderApp: ProviderPi,
 		// pi ≥0.99 支持 MCP：配置在 <agentDir>/mcp.json 顶层 mcpServers，
 		// 形状与其他 MCP client 一致；legacy SSE transport 不被接受。
 		Mcp: McpLayout{
-			Prefix:     "mcpServers",
-			ConfigType: McpConfigCommon,
+			Prefix:         "mcpServers",
+			ConfigType:     McpConfigCommon,
+			SSEUnsupported: true,
 		},
 		Global: GlobalLayout{
 			Root:          RootPiAgentDir,
 			SkillDir:      "skills",
 			McpConfigPath: "mcp.json",
 		},
-		// 项目级 mcp.json 仅在项目被 pi trust 后生效；写入配置本身无害。
-		Project: &ProjectLayout{
-			SkillDir:      ".pi/skills",
-			McpConfigPath: ".pi/mcp.json",
-		},
-		Template: TemplateStandard,
 	},
 	{
 		Key:         "dsh",
 		Label:       "DeepSeek Harness",
 		SourceApp:   SourceDsh,
-		TargetID:    "dsh",
 		ProviderApp: ProviderDsh,
 		// dsh 的 MCP 配置是 Cordis patch 操作列表，按 name+serverName
 		// 定位条目，没有 configPrefix 概念。
@@ -343,13 +302,23 @@ var AgentSpecs = []AgentSpec{
 			SkillDir:      "skills",
 			McpConfigPath: "cordis.patch.yml",
 		},
-		// dsh 项目层只读 skills（项目 rank 优先于用户级）；MCP 走全局
-		// Cordis patch，项目级没有配置文件，是“仅 skill 分发”形态。
-		Project: &ProjectLayout{
-			SkillDir:      ".dsh/skills",
-			McpConfigPath: "",
+	},
+	{
+		// Hermes（桌面版与 CLI 共用 HERMES_HOME）。非会话来源、非 providers
+		// 应用，只做分发目标；契约见 Ref.md Hermes 节。MCP 条目方言与
+		// common 相同（command/args/env），载体是 config.yaml（YAML 载体由
+		// common 方言按扩展名支持），写入节点为顶层 mcp_servers。
+		Key:   "hermes",
+		Label: "HermesAgent",
+		Mcp: McpLayout{
+			Prefix:     "mcp_servers",
+			ConfigType: McpConfigCommon,
 		},
-		Template: TemplateAbsent,
+		Global: GlobalLayout{
+			Root:          RootHermesHome,
+			SkillDir:      "skills",
+			McpConfigPath: "config.yaml",
+		},
 	},
 }
 
@@ -383,11 +352,9 @@ func RenderAgentLabelsTS() string {
 	for i := range AgentSpecs {
 		spec := &AgentSpecs[i]
 		fmt.Fprintf(&labels, "  %s: \"%s\",\n", spec.Key, spec.Label)
-		// 有 target 入口的才是 workspace 里可配置的 agent：前端「启用的 agents」
-		// 选择器要用这份清单，而不是自己再写一遍。
-		if spec.TargetID != "" {
-			fmt.Fprintf(&ids, "  \"%s\",\n", spec.TargetID)
-		}
+		// 清单全部工具都可通过 workspace 预设配置分发落点：前端「关于页工具
+		// 名单」等从这里取，而不是自己再写一遍。
+		fmt.Fprintf(&ids, "  \"%s\",\n", spec.Key)
 		if spec.SourceApp != "" {
 			wire := string(spec.SourceApp)
 			if wire != spec.Key {
@@ -400,13 +367,13 @@ func RenderAgentLabelsTS() string {
 	return fmt.Sprintf(`// 自动生成：go test ./internal/agents 触发。
 // 来源：internal/agents 的 AgentSpecs 清单（工具静态清单单一来源）；请勿手改。
 
-// agent 的产品名集中维护：会话来源、workspace target、providers 的界面文案
+// agent 的产品名集中维护：会话来源、workspace 预设、providers 的界面文案
 // 都从这里取，避免同一个工具在不同界面出现 codex / Codex / claude 等不同写法。
 export const AGENT_LABELS: Record<string, string> = {
 %s};
 
-// 可配置的 agent 清单与顺序（与后端 AgentSpecs 清单一致）：项目成员的候选、目标
-// 选择器等都从这里取，不再前端另维护一份拷贝。
+// 可配置的 agent 清单与顺序（与后端 AgentSpecs 清单一致）：workspace 预设、
+// 关于页工具名单等都从这里取，不再前端另维护一份拷贝。
 export const AGENT_IDS = [
 %s] as const;
 
