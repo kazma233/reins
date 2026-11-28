@@ -28,7 +28,7 @@ commit 与当时 latest tag。
 > ③ 商业/打包版与仓库可能有版本差(见各节「版本差异」),源码是查证工具而非
 > 契约本身。
 
-## 一、六个有源码的被管理工具
+## 一、七个有源码的被管理工具
 
 ### 1. openai/codex ⭐（会话与 provider 知识最完整）
 
@@ -274,6 +274,49 @@ commit 与当时 latest tag。
   `internal/providers/app_zcode.go`、契约
   `docs/context/2026-09-25-providers-contract-verification.md` 补充(七)、
   `docs/context/2026-09-29-zcode-session-storage-exploration.md`。
+
+### 7. NousResearch/hermes-agent（Hermes，2026-11-28 接入分发目标）
+
+- **仓库**:https://github.com/NousResearch/hermes-agent (MIT,Python)。
+  官方桌面版 Hermes Desktop 与 CLI **共用同一 HERMES_HOME**("same config,
+  same skills, same sessions"),文档站 hermes-agent.nousresearch.com/docs。
+- **调研基线**:官方文档站(2026-11-28 抓取)+ **本机安装的自带源码**
+  (`%LOCALAPPDATA%\hermes\hermes-agent`,即用户实际运行版本的源码,证据等级
+  最高)。未核对 GitHub 发布 tag——本机源码即运行时行为。
+- **配置根与重定向**:`HERMES_HOME` 官方环境变量;未设置时 POSIX 默认
+  `~/.hermes`、**Windows 默认 `%LOCALAPPDATA%\hermes`**(标准环境等价于 HOME
+  下的 `AppData/Local/hermes`;LOCALAPPDATA 被改过且未设 HERMES_HOME 的极端
+  环境不在清单模型内)。本机实测安装根就是 `%LOCALAPPDATA%\hermes`。
+- **skills**:`<hermes_home>/skills/`,每技能一目录含必需 `SKILL.md`
+  (YAML frontmatter,兼容 agentskills.io)。扫描语义(本机源码
+  `agent/skill_utils.py` 的 `iter_skill_index_files`):
+  ① `os.walk` **递归无深度限制**;② `followlinks=True`——**目录符号链接
+  被跟随**,reins 的目录链接分发方式原生兼容;③ 剪除
+  `EXCLUDED_SKILL_DIRS`(`.git`/`.hub`/`node_modules`/`__pycache__` 等,
+  技能名不会撞上)与技能包内支撑目录(`references/templates/assets/scripts`);
+  ④ 分类目录(如 `mlops/axolotl/`)只是路径派生的展示字段,平铺合法。
+- **同名冲突**(本机源码 `resolve_skill_catalog` / `pick_skill_candidate`):
+  层级 trusted project > 本地 `skills/` > `skills.create_dir` > external_dirs;
+  同层同根同 frontmatter `name` 且字节不同(非符号链接同源)→ 裸名报
+  `Ambiguous skill name` 拒收,分类目录**不构成命名空间**;reins 分发技能与
+  bundled 技能(`.bundled_manifest` 记录 origin 哈希,`mlops/claude-code` 等)
+  撞名时属于工具侧行为,reins 冲突预演不模拟。
+- **MCP**:配置在 `<hermes_home>/config.yaml` 顶层 **`mcp_servers` YAML
+  映射**(无独立文件;官方文档 hermes-agent.nousresearch.com/docs/user-guide/
+  features/mcp)。stdio 条目 `command/args/env`、远程条目 `url/headers`,
+  无 type 判别字段;可选 `enabled/lazy/timeout` 等键 reins 不写。写入必须
+  手术编辑保留文件其余内容(gateway/skills 等大量其他顶层键,本机 config.yaml
+  实测有 30+ 顶层键)。**reins 侧条目方言与 common 相同,hermes 不是独立
+  配置格式**——common 按扩展名支持 JSON/TOML/YAML 载体,`config_type:
+  hermes` 旧值解析时归一为 common(2026-11-28 起)。
+- **会话**(仅记录,未接入):`<hermes_home>/state.db`(SQLite+WAL,FTS5,
+  每 profile 一个);旧 JSONL transcript 已废弃。
+- **边界**:多 profile(各自独立 HERMES_HOME)与 `HERMES_DATA_DIR_SUFFIX`
+  渠道变体不做;`skills.create_dir`/`external_dirs` 重定向不改写本目录语义。
+- **reins 接入**:AgentSpec 条目 `internal/agents/agents.go`(hermes)、
+  MCP writer `internal/workspace/mcp_formats.go`(McpConfigHermes)、
+  决策 `docs/decisions/2026-11-28-skill-and-mcp-paths.md`。**未做真机
+  端到端分发验证**(写入链经 HERMES_HOME 沙箱测试)。
 
 ## 二、Claude Code:无官方源码
 

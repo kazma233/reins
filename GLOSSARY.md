@@ -7,7 +7,7 @@ reins 是管理多个 AI CLI 编码工具的桌面应用：浏览历史会话、
 ### 通用
 
 **工具清单（agents / AgentSpec）**：
-reins 管理的全部 AI 编码工具的静态描述表：规范键、产品名、跨域 id 映射、全局与项目布局；是唯一的单一来源，各域的 defaults 表、模板与文案从中派生。
+reins 管理的全部 AI 编码工具的静态描述表：规范键、产品名、跨域 id 映射、全局布局；是唯一的单一来源，各域的 defaults 表与文案从中派生。
 _Avoid_: agent 列表、target 表（指派生出的副本）
 
 ### 会话（session 域）
@@ -46,32 +46,36 @@ _Avoid_: 路径主键、transcript key
 
 ### 工作区（workspace 域）
 
+**技能路径（skill path）**：
+接受 skills 分发的一个命名目录条目：技能以目录链接装入，同步、冲突预演与卸载的物理语义都挂在这条路径上。skills 与 MCP 各自独立配置，互不引用。
+_Avoid_: 目标、target（已废弃的旧概念）、容器
+
+**MCP 路径（MCP path）**：
+接受 MCP 分发的一份命名条目：MCP 配置文件路径 + 格式 writer + 前缀。与技能路径互不约束。
+_Avoid_: 目标、target（已废弃的旧概念）
+
 **目标（target）**：
-接受 skills 与 MCP 分发的一份工具配置，分全局与项目两级。
-_Avoid_: agent（太泛）、容器
+已废弃。2026-11-28 前接受 skills 与 MCP 分发的一份工具配置（分全局与项目两级、二者捆绑寻址），由技能路径与 MCP 路径替代；见 [技能路径决策](docs/decisions/2026-11-28-skill-and-mcp-paths.md)。
+_Avoid_: 在新代码与文档里继续使用
 
 **环境重定向（env redirect）**：
 工具官方支持的全局目录重定位（如 `CODEX_HOME`、`CLAUDE_CONFIG_DIR`、`GROK_HOME`、`PI_CODING_AGENT_DIR`、`DSH_HOME`）。认哪个变量、默认目录是什么由 `internal/agents` 清单的 `GlobalRoot` 持有，解析统一走 `internal/support` 的 `Environment.Resolve`；不随重定向搬移的落点在清单里以 `~/` 前缀显式标注。域内自己再拼一份 `~/.codex` 之类的路径视为重复定义。
 _Avoid_: 路径助手（指各域自带的路径拼接函数）
 
 **安装面（install surface）**：
-「把一个 skill 装进一个 target」的物理语义：目标是否参与分发、目录链接落在哪、落点当前是什么（未安装 / 已指向本 skill / 指向同来源别的 skill / 指向别处 / 真实文件目录）、装与卸的结果。安装、冲突预演、链接枚举、按来源卸载四条路径都经 `internal/workspace/skill_install.go`，判定只此一份。
+「把一个 skill 装进一个技能路径」的物理语义：路径是否参与分发、目录链接落在哪、落点当前是什么（未安装 / 已指向本 skill / 指向同来源别的 skill / 指向别处 / 真实文件目录）、装与卸的结果。安装、冲突预演、链接枚举、按来源卸载四条路径都经 `internal/workspace/skill_install.go`，判定只此一份。
 _Avoid_: 链接工具函数（指各调用方自带的路径比较与 skip 判断）
 
 **启停（enable/disable）**：
-已废弃的概念。target 与 MCP 条目都没有开关：配置在盘上就是生效的，不需要分发就不写进该 target 的配置；旧 config.yaml 里的 `enabled` 键被忽略且不再写回。
-_Avoid_: 停用目标、禁用 MCP（指旧版本里的开关语义）
+已废弃的概念。技能路径、MCP 路径与 MCP 条目都没有开关：配置在盘上就是生效的，不需要分发就不写进该路径的配置；旧 config.yaml 里的 `enabled` 键被忽略且不再写回。
+_Avoid_: 停用路径、禁用 MCP（指旧版本里的开关语义）
 
-**别名落点（alias skill dir）**：
-某个 target 的 skills 目录本身是指向别处的软链接。此时该 target 不拥有那个目录：内容由链接另一端负责，它不参与技能分发，界面也不给勾选，只标注「内容属谁」与「文件实际在哪」。默认配置里可以合法使用（项目级整目录继承全局目录）。
+**别名路径（alias skill dir）**：
+某个技能路径的目录本身是指向别处的软链接。此时该条目不拥有那个目录：内容由链接另一端负责，它不参与技能分发，界面也不给勾选，只标注「内容属谁」与「文件实际在哪」。
 _Avoid_: 继承（只在需要强调来源时使用）、写穿（这是个动作描述，不是状态）
 
-**目标地址（target address）**：
-一个 target 的标识，全局 target 就是它的 id，项目级是 `项目:agent`。两段只在寻址层被拆解或拼装，其余地方把地址当不透明关联键使用。
-_Avoid_: 复合 id（只在讨论格式本身时使用）
-
 **跳过（skip）**：
-「这个目标地址不参与分发」的领域判定，只有一处（寻址层）。它回答原因（地址不存在 / skill_dir 整层是链接），调用方只决定表现方式：报错、提示或静默。
+「这条技能路径不参与分发」的领域判定，只有一处（寻址层）。它回答原因（条目不存在 / 目录整层是链接），调用方只决定表现方式：报错、提示或静默。
 _Avoid_: 禁用（已废弃的启停概念）、忽略
 
 **技能源（skill source）**：
@@ -81,6 +85,10 @@ _Avoid_: skill 仓库
 **MCP 格式 writer（MCP format writer）**：
 一种目标工具 MCP 配置格式的完整知识（条目形态、支持的文件格式、前缀约束、读写与预览）；mcps 域的编排只经唯一分发点调用 writer，不再按工具类型写特例。
 _Avoid_: config type 分发（指旧的散落 match 形态）
+
+**MCP 同步（MCP sync）**：
+把登记的 MCP server 批量收敛进各 MCP 路径的单一动作：格子矩阵（行 = server、列 = 路径）勾出期望态，同步 = 每条路径收敛到该列勾选集合（勾选写入/刷新、已装未勾移除），只动登记在册的 server 名；写前聚合预演，结果逐格收集。
+_Avoid_: 应用（apply，指旧的逐路径写入动作）、分发目标、启停
 
 ### 模型配置（providers 域）
 
